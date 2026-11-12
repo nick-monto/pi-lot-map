@@ -30,10 +30,10 @@ The same board is a pi extension and an omp plugin. Neither form opens by itself
 
 ```bash
 pi -e ~/path/to/lot-map                 # try it without installing
-pi install git:github.com/nick-monto/pi-lot-map@feat/pi-omp-plugin   # until this lands on the default branch
+pi install git:github.com/nick-monto/pi-lot-map
 
 omp -e ~/path/to/lot-map
-omp plugin install ~/path/to/lot-map    # or git:github.com/nick-monto/pi-lot-map@feat/pi-omp-plugin
+omp plugin install ~/path/to/lot-map    # or git:github.com/nick-monto/pi-lot-map
 ```
 
 `/lot-map` with no argument opens or closes the terminal ring. It also takes `on`, `off`, `map`, `feed`, `auto` or `web`. `auto` draws the ring when the terminal has at least 32 rows and the feed alone otherwise. Set `enabled` in the settings file to start sessions with the ring already open; nothing opens a browser window until `/lot-map web`.
