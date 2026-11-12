@@ -1,0 +1,28 @@
+{
+  "name": "lot-map",
+  "version": "0.4.1",
+  "description": "A live map of the work beside the chat: one plugin for Claude Code, pi and omp",
+  "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "Aleksei Volodin",
+    "url": "https://github.com/alexeyw"
+  },
+  "homepage": "https://github.com/nick-monto/pi-lot-map",
+  "repository": "https://github.com/nick-monto/pi-lot-map",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "omp-plugin",
+    "visualization",
+    "tool-calls",
+    "subagents",
+    "memory"
+  ],
+  "pi": {
+    "extensions": ["./pi"]
+  },
+  "scripts": {
+    "test": "bun test pi"
+  }
+}

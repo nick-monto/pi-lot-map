@@ -1,6 +1,6 @@
 # lot-map
 
-A mod for Claude Code: a live map of the work, in a pane beside the chat. Every tool call, model step, hook and skill sends a pulse from the centre to its station, so you see memory, files, shell, web and agents at work instead of reading a list of commands.
+A mod for Claude Code, pi and omp: a live map of the work, in a pane beside the chat (Claude Code) or above the editor (pi and omp). Every tool call, model step, hook and skill sends a pulse from the centre to its station, so you see memory, files, shell, web and agents at work instead of reading a list of commands.
 
 ![The map during a work session](docs/demo.gif)
 
@@ -23,6 +23,30 @@ claude plugin install lot-map --marketplace alexeyw/lot-map
 In the desktop app: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `alexeyw/lot-map`, then **Add plugin**.
 
 The pane opens by itself when a session starts. In a terminal it needs at least 144 columns and draws text only; otherwise type `/lot-map`. Built and tested on Claude Code 2.1.321 on macOS; users report it working on Windows as well.
+
+### pi and omp
+
+The same board is a pi extension and an omp plugin. Neither form opens by itself: `/lot-map` draws the terminal ring above the editor, and `/lot-map web` opens the browser window with the pane's own SVG drawing.
+
+```bash
+pi -e ~/path/to/lot-map                 # try it without installing
+pi install git:github.com/nick-monto/pi-lot-map@feat/pi-omp-plugin   # until this lands on the default branch
+
+omp -e ~/path/to/lot-map
+omp plugin install ~/path/to/lot-map    # or git:github.com/nick-monto/pi-lot-map@feat/pi-omp-plugin
+```
+
+`/lot-map` with no argument opens or closes the terminal ring. It also takes `on`, `off`, `map`, `feed`, `auto` or `web`. `auto` draws the ring when the terminal has at least 32 rows and the feed alone otherwise. Set `enabled` in the settings file to start sessions with the ring already open; nothing opens a browser window until `/lot-map web`.
+
+The ring is the terminal form of the pane: ten stations with three-letter names, a dot on every call still flying, `!` on a station that failed since your last message, and a count beside each station. The centre has the context percentage, the centre's name and the model. Below it are the tally and the newest rows. The memory station has its own colour; its tools (`retain`, `recall`, `reflect`, `memory_edit`) light it without seeing what is remembered.
+
+A subagent is a row on Agents; in omp its own tool calls leave from that station and keep the map alive until it ends. A bash call sent to the background keeps its row open until the job reports back. A tool awaiting approval lights Hooks.
+
+`/lot-map web` serves the pane's own SVG drawing to a browser window: the same stations, pulses and colours the Claude pane shows, at browser frame rate. It opens a Chromium or Edge app window when one is installed and the default browser otherwise; the URL is also printed so the window can be placed wherever you like. Frames come from `127.0.0.1` under a random path and only while a page asks for them. Set `webPort` to pin the port (a busy one falls back to a free port) and `browser` to a command that opens the URL; `{}` in that command stands for the URL.
+
+Settings live in `~/.pi/agent/lot-map.json` or `~/.omp/agent/lot-map.json`; `LOT_MAP_CONFIG` points elsewhere. The keys are `enabled` (off by default), `view` (`auto`, `map` or `feed`), `placement` (`above` or `below`), `language`, `coreName`, `webPort`, `browser`, and the memory options from the Claude mod: `memoryServers`, `memoryCommands`, `memorySubcommands`, `memoryPaths`, `memoryLabels`. Changes are read at session start and on `/reload`.
+
+What the terminal view does not have: the SVG drawing (it gets cells) and a pane side by side with the chat; `/lot-map web` carries the drawing to a browser window instead. There is no memory of the model used in the last session in a folder. In omp, subagents are read from the task frames; a pi extension that spawns agents is outside the map's view for now.
 
 ## Updating
 
