@@ -4,10 +4,10 @@ What changed in each version of lot-map, newest first. To get a new version, see
 
 ## Unreleased
 
-- A pi extension and an omp plugin: the same board drawn above the editor, in cells and the terminal's own theme. Ten stations with counts and fault marks, a dot on every call still flying, a centre with the context percentage, the core name and the model, a tally, and the newest rows. `/lot-map` opens or closes it and takes `on`, `off`, `map`, `feed` or `auto`.
+- A pi extension and an omp plugin: the same board drawn above the editor, in cells and the terminal's own theme. Ten stations with counts and fault marks, a dot on every call still flying, a centre with the context percentage, the core name and the model, a tally, and the newest rows. `/lot-map` opens or closes it and takes `on`, `off`, `map`, `feed`, `auto` or `web`; neither view opens by itself.
 - pi and omp tools are classified on the same stations: `read`/`write`/`edit`/`grep`/`find`/`lsp` on Files, `bash` by its command as before, web and browser tools, `task`/`wait` on Agents, and `retain`/`recall`/`reflect`/`memory_edit` on Memory.
 - omp subagents are read from the task frames: a row on Agents, their own tool calls leaving from that station, and the row closing when the agent ends. A bash call sent to the background keeps its row open until the job reports back, and a tool waiting on approval lights Hooks.
-- `/lot-map web` serves the pane's own SVG drawing to a browser window from `127.0.0.1`, under a random token path; a Chromium or Edge app window opens when one is installed. `webPort` and `browser` settings.
+- `/lot-map web` serves the pane's own SVG drawing to a browser window from `127.0.0.1`, under a random token path; a Chromium or Edge app window opens when one is installed, and nothing opens a window until asked. `webPort` and `browser` settings.
 - Settings for the port live in `lot-map.json` under the host's agent folder; the Claude mod's options and files are unchanged.
 
 ## 0.5.1 (2026-11-11)

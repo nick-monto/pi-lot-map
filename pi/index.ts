@@ -69,7 +69,13 @@ function readConfig(omp: boolean): { setup: Setup; config: Config } {
   const browser = typeof options.browser === 'string' && options.browser.trim() !== '' ? options.browser.trim() : undefined
   return {
     setup: setupFrom(options),
-    config: { view, enabled: options.enabled !== false, placement: options.placement === 'below' ? 'belowEditor' : 'aboveEditor', webPort, ...(browser !== undefined ? { browser } : {}) },
+    config: {
+      view,
+      enabled: options.enabled === true,
+      placement: options.placement === 'below' ? 'belowEditor' : 'aboveEditor',
+      webPort,
+      ...(browser !== undefined ? { browser } : {}),
+    },
   }
 }
 
@@ -100,7 +106,7 @@ type ToolEnd = ToolStart & { isError?: boolean; result?: unknown }
 export default function lotMap(host: Host): void {
   let board: Board = { entries: [], counts: {} }
   let setup = setupFrom({})
-  let config: Config = { view: 'auto', enabled: true, placement: 'aboveEditor', webPort: 0 }
+  let config: Config = { view: 'auto', enabled: false, placement: 'aboveEditor', webPort: 0 }
   let serial = 0
   let current: HostContext | undefined
   let surfaceRows = 0
@@ -471,6 +477,7 @@ export default function lotMap(host: Host): void {
       }
       if (word === 'map' || word === 'feed' || word === 'auto') {
         config = { ...config, view: word }
+        enabled = true
       } else if (word === 'on') {
         enabled = true
       } else if (word === 'off') {
