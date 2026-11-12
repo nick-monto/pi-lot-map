@@ -4,11 +4,13 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { setupFrom, shortModel } from '../hooks/map'
+import { drawMap, setupFrom, shortModel } from '../hooks/map'
 import type { Setup } from '../hooks/map'
 import type { Board, Entry, StationId, Status } from '../types'
 import { classifyPi } from './classify'
 import { renderWidget } from './render'
+import { openWindow, serveFrames } from './web'
+import type { FrameServer } from './web'
 
 /** The surface a host actually gives an extension; both pi and omp satisfy it. */
 type HostContext = {
@@ -35,7 +37,7 @@ type Host = {
   events?: { on: (channel: string, listener: (data: unknown) => void) => () => void }
 }
 
-type Config = { view: 'auto' | 'map' | 'feed'; enabled: boolean; placement: 'aboveEditor' | 'belowEditor' }
+type Config = { view: 'auto' | 'map' | 'feed'; enabled: boolean; placement: 'aboveEditor' | 'belowEditor'; webPort: number; browser?: string }
 
 const KEY = 'lot-map'
 const KEEP = 80
@@ -63,9 +65,11 @@ function readConfig(omp: boolean): { setup: Setup; config: Config } {
     // No settings, or settings that cannot be read: the defaults stand.
   }
   const view = options.view === 'map' || options.view === 'feed' ? options.view : 'auto'
+  const webPort = typeof options.webPort === 'number' && Number.isInteger(options.webPort) && options.webPort > 0 && options.webPort < 65_536 ? options.webPort : 0
+  const browser = typeof options.browser === 'string' && options.browser.trim() !== '' ? options.browser.trim() : undefined
   return {
     setup: setupFrom(options),
-    config: { view, enabled: options.enabled !== false, placement: options.placement === 'below' ? 'belowEditor' : 'aboveEditor' },
+    config: { view, enabled: options.enabled !== false, placement: options.placement === 'below' ? 'belowEditor' : 'aboveEditor', webPort, ...(browser !== undefined ? { browser } : {}) },
   }
 }
 
@@ -96,7 +100,7 @@ type ToolEnd = ToolStart & { isError?: boolean; result?: unknown }
 export default function lotMap(host: Host): void {
   let board: Board = { entries: [], counts: {} }
   let setup = setupFrom({})
-  let config: Config = { view: 'auto', enabled: true, placement: 'aboveEditor' }
+  let config: Config = { view: 'auto', enabled: true, placement: 'aboveEditor', webPort: 0 }
   let serial = 0
   let current: HostContext | undefined
   let surfaceRows = 0
@@ -106,6 +110,7 @@ export default function lotMap(host: Host): void {
   let stopTicker: (() => void) | undefined
   let lastActivity = 0
   let turnEntry: string | undefined
+  let web: FrameServer | undefined
   /** A subagent's own extension instance keeps no board: the parent draws it from the task frames. */
   let serving = true
   const toolEntries = new Map<string, string>()
@@ -252,6 +257,29 @@ export default function lotMap(host: Host): void {
     }
   }
 
+  /** The same drawing, in a browser window: only the token path is served, and only to this machine. */
+  async function openWeb(ctx: HostContext): Promise<void> {
+    if (web === undefined) {
+      try {
+        web = await serveFrames({ port: config.webPort, frame: () => drawMap(board, now(), setup) })
+      } catch {
+        if (config.webPort !== 0) {
+          try {
+            web = await serveFrames({ port: 0, frame: () => drawMap(board, now(), setup) })
+          } catch {
+            // No port to be had.
+          }
+        }
+      }
+      if (web === undefined) {
+        ctx.ui?.notify?.('The work map could not open a port.', 'error')
+        return
+      }
+    }
+    const opened = await openWindow(web.url, config.browser)
+    ctx.ui?.notify?.(opened ? `Work map opened: ${web.url}` : `Work map: ${web.url}`, 'info')
+  }
+
   /** A row that failed before it could report back is settled when the answer is ready. */
   function settleStale(): void {
     const stale = new Set(board.entries.filter(e => e.status === 'run' && e.task === undefined && e.agentId === undefined))
@@ -297,6 +325,8 @@ export default function lotMap(host: Host): void {
 
   host.on('session_shutdown', (_event, ctx) => {
     detach(ctx)
+    void web?.close()
+    web = undefined
   })
 
   host.on('input', (event: { source?: string; text?: string }, ctx) => {
@@ -432,9 +462,13 @@ export default function lotMap(host: Host): void {
   })
 
   host.registerCommand('lot-map', {
-    description: 'Toggle the work map above the editor (on, off, map, feed, auto)',
-    handler: (args, ctx) => {
+    description: 'Toggle the work map above the editor, or open the browser view (on, off, map, feed, auto, web)',
+    handler: async (args, ctx) => {
       const word = args.trim().toLowerCase()
+      if (word === 'web') {
+        await openWeb(ctx)
+        return
+      }
       if (word === 'map' || word === 'feed' || word === 'auto') {
         config = { ...config, view: word }
       } else if (word === 'on') {
