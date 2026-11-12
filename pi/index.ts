@@ -265,15 +265,14 @@ export default function lotMap(host: Host): void {
 
   /** The same drawing, in a browser window: only the token path is served, and only to this machine. */
   async function openWeb(ctx: HostContext): Promise<void> {
-    // The window carries the session's name, or the folder it works in when the session has none, and the tail of
+    // The window is named after the session, the folder it works in when the session has no name, and the tail of
     // its id, which tells two windows in one project apart and matches the end of the session's own file name.
     // Read per page load, so a window opened again shows the name the session has by then.
     const title = (): string => {
       const manager = (current ?? ctx).sessionManager
-      const name = clean(manager?.getSessionName?.() ?? '', 80) || clean(basename(manager?.getCwd?.() ?? ''), 80)
+      const name = clean(manager?.getSessionName?.() ?? '', 80) || clean(basename(manager?.getCwd?.() ?? ''), 80) || 'lot-map'
       const id = (manager?.getSessionId?.() ?? '').replace(/\W/g, '').slice(-8)
-      const label = [name, id === '' ? '' : `[${id}]`].filter(part => part !== '').join(' ')
-      return label === '' ? 'lot-map' : `lot-map: ${label}`
+      return id === '' ? name : `${name} [${id}]`
     }
     if (web === undefined) {
       try {
