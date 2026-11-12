@@ -2,6 +2,13 @@
 
 What changed in each version of lot-map, newest first. To get a new version, see [Updating](README.md#updating).
 
+## Unreleased
+
+- A pi extension and an omp plugin: the same board drawn above the editor, in cells and the terminal's own theme. Ten stations with counts and fault marks, a dot on every call still flying, a centre with the context percentage, the core name and the model, a tally, and the newest rows. `/lot-map` opens or closes it and takes `on`, `off`, `map`, `feed` or `auto`.
+- pi and omp tools are classified on the same stations: `read`/`write`/`edit`/`grep`/`find`/`lsp` on Files, `bash` by its command as before, web and browser tools, `task`/`wait` on Agents, and `retain`/`recall`/`reflect`/`memory_edit` on Memory.
+- omp subagents are read from the task frames: a row on Agents, their own tool calls leaving from that station, and the row closing when the agent ends. A bash call sent to the background keeps its row open until the job reports back, and a tool waiting on approval lights Hooks.
+- Settings for the port live in `lot-map.json` under the host's agent folder; the Claude mod's options and files are unchanged.
+
 ## 0.5.1 (2026-11-11)
 
 - The MP4 copy of the demo is back at `docs/demo.mp4`, where links from outside point; it was removed in 0.3.9. The README links to it again.

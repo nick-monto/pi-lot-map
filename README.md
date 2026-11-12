@@ -1,6 +1,6 @@
 # lot-map
 
-A mod for Claude Code: a live map of the work, in a pane beside the chat. Every tool call, model step, hook and skill sends a pulse from the centre to its station, so you see memory, files, shell, web and agents at work instead of reading a list of commands.
+A mod for Claude Code, pi and omp: a live map of the work, in a pane beside the chat (Claude Code) or above the editor (pi and omp). Every tool call, model step, hook and skill sends a pulse from the centre to its station, so you see memory, files, shell, web and agents at work instead of reading a list of commands.
 
 ![The map during a work session](docs/demo.gif)
 
@@ -23,6 +23,28 @@ claude plugin install lot-map --marketplace alexeyw/lot-map
 In the desktop app: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `alexeyw/lot-map`, then **Add plugin**.
 
 The pane opens by itself when a session starts. In a terminal it needs at least 144 columns and draws text only; otherwise type `/lot-map`. Built and tested on Claude Code 2.1.321 on macOS; users report it working on Windows as well.
+
+### pi and omp
+
+The same board is a pi extension and an omp plugin. It draws above the editor, opens by itself, and takes `/lot-map` to close or open it.
+
+```bash
+pi -e ~/path/to/lot-map                 # try it without installing
+pi install git:github.com/nick-monto/pi-lot-map@feat/pi-omp-plugin   # until this lands on the default branch
+
+omp -e ~/path/to/lot-map
+omp plugin install ~/path/to/lot-map    # or git:github.com/nick-monto/pi-lot-map@feat/pi-omp-plugin
+```
+
+`/lot-map` also takes `on`, `off`, `map`, `feed` or `auto`. `auto` draws the ring when the terminal has at least 32 rows and the feed alone otherwise.
+
+The ring is the terminal form of the pane: ten stations with three-letter names, a dot on every call still flying, `!` on a station that failed since your last message, and a count beside each station. The centre has the context percentage, the centre's name and the model. Below it are the tally and the newest rows. The memory station has its own colour; its tools (`retain`, `recall`, `reflect`, `memory_edit`) light it without seeing what is remembered.
+
+A subagent is a row on Agents; in omp its own tool calls leave from that station and keep the map alive until it ends. A bash call sent to the background keeps its row open until the job reports back. A tool awaiting approval lights Hooks.
+
+Settings live in `~/.pi/agent/lot-map.json` or `~/.omp/agent/lot-map.json`; `LOT_MAP_CONFIG` points elsewhere. The keys are `enabled`, `view` (`auto`, `map` or `feed`), `placement` (`above` or `below`), `language`, `coreName`, and the memory options from the Claude mod: `memoryServers`, `memoryCommands`, `memorySubcommands`, `memoryPaths`, `memoryLabels`. Changes are read at session start and on `/reload`.
+
+What it does not have: the SVG drawing (terminals get cells), a pane side by side with the chat, and a memory of the model used in the last session in a folder. In omp, subagents are read from the task frames; a pi extension that spawns agents is outside the map's view for now.
 
 ## Updating
 

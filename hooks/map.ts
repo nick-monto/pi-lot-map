@@ -81,7 +81,7 @@ export type Classified = { station: StationId; label: string }
 /** A path with Windows separators written as `/`, so that one rule reads paths from every system. */
 const slashes = (path: string): string => path.replace(/\\/g, '/')
 
-const lastTwo = (path: string): string => slashes(path).split('/').filter(Boolean).slice(-2).join('/')
+export const lastTwo = (path: string): string => slashes(path).split('/').filter(Boolean).slice(-2).join('/')
 
 const HOST = /^(?:[\p{L}\p{N}.-]+|\[[0-9a-f:.]+\])(?::\d+)?$/iu
 
@@ -90,7 +90,7 @@ const HOST = /^(?:[\p{L}\p{N}.-]+|\[[0-9a-f:.]+\])(?::\d+)?$/iu
  * A password may hold `/`, `?` or `#` unencoded, so the first of them is not always where the host ends:
  * `user:pa/ss@host` reads as the host `host`, and an address that can be read both ways gives its scheme alone.
  */
-function hostOf(url: string): string {
+export function hostOf(url: string): string {
   const [, scheme = '', rest = ''] = /^(?:([a-z][a-z0-9+.-]*):\/\/)?(.*)$/is.exec(url) ?? []
   const end = rest.search(/[/?#]/)
   const first = end < 0 ? rest : rest.slice(0, end)
@@ -110,7 +110,7 @@ export function clean(label: string, max = 120): string {
 }
 
 /** Claude Code's own memory folder counts for everyone; anything else is the person's to name. */
-const isMemoryPath = (path: string, setup: Setup): boolean => {
+export const isMemoryPath = (path: string, setup: Setup): boolean => {
   const p = slashes(path)
   return /\/\.claude\/projects\/[^/]+\/memory\//.test(p) || setup.memoryPaths.some(part => p.includes(slashes(part)))
 }
@@ -184,7 +184,7 @@ function memoryLabel(words: string[], setup: Setup): string {
 }
 
 /** The line of a shell tool. `powershell` adds PowerShell's own command names and reads every name in lower case. */
-function classifyShell(command: string, description: string, setup: Setup, powershell = false): Classified {
+export function classifyShell(command: string, description: string, setup: Setup, powershell = false): Classified {
   const name = (word?: string): string => (powershell ? base(word).toLowerCase() : base(word))
   // PowerShell runs a quoted path with `&` and keeps results in `$name = ...`: neither is the command.
   const own = (words: string[]): string[] => {
