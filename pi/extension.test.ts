@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test'
 
-import { setupFrom } from '../hooks/map'
+import { drawMap, setupFrom } from '../hooks/map'
 import type { Board } from '../types'
 import { classifyPi } from './classify'
+import lotMap from './index'
 import { renderWidget } from './render'
 
 const setup = setupFrom({ coreName: 'OMP', memoryServers: ['memory'] })
@@ -81,4 +82,16 @@ test('a long label is cut, and the map shows a fault as a mark', () => {
   expect(map[1 + 9]).toContain('Files 3')
   expect(map.slice(1, 10).some(line => line.includes('!'))).toBe(true)
   expect(map[map.length - 1]).toContain('…')
+})
+
+test('the extension entry loads against the shared helpers', () => {
+  expect(typeof lotMap).toBe('function')
+})
+
+test('the shared drawing still gives the browser view a whole SVG', () => {
+  const svg = drawMap(board, 2_000, setup)
+  expect(svg).toMatch(/^<svg\b/)
+  expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"')
+  expect(svg.trimEnd().endsWith('</svg>')).toBe(true)
+  expect(svg).toContain('>OMP<')
 })
