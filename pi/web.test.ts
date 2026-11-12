@@ -56,6 +56,25 @@ test('the page and its frames are served under the token, and nowhere else', asy
   }
 })
 
+test('the window is named after the session, and the name cannot read as markup', async () => {
+  let name = `lot-map: a<b & "c" it's`
+  const titled = await serveFrames({ frame: () => '<svg/>', title: () => name })
+  try {
+    expect((await get(titled.url)).body).toContain('<title>lot-map: a&#60;b &#38; &#34;c&#34; it&#39;s</title>')
+    // A window opened again after the session was renamed shows the new name.
+    name = 'lot-map: renamed'
+    expect((await get(titled.url)).body).toContain('<title>lot-map: renamed</title>')
+  } finally {
+    await titled.close()
+  }
+  const plain = await serveFrames({ frame: () => '<svg/>' })
+  try {
+    expect((await get(plain.url)).body).toContain('<title>lot-map</title>')
+  } finally {
+    await plain.close()
+  }
+})
+
 test('a foreign host cannot read the map', async () => {
   const server = await serveFrames({ frame: () => '<svg/>' })
   try {

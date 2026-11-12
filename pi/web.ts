@@ -9,10 +9,10 @@ import { delimiter, join } from 'node:path'
 
 export type FrameServer = { url: string; close: () => Promise<void> }
 
-/** The page asks for the next frame as fast as the browser draws, and gives up when hidden. */
-const PAGE = `<!doctype html>
+/** The page asks for the next frame as fast as the browser draws, and gives up when hidden. The title is escaped: a session name may hold any character, none of it markup. */
+const page = (title: string): string => `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>lot-map</title>
+<title>${title.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)}</title>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#0a0c11}
 @media (prefers-color-scheme:light){html,body{background:#f5f2ea}}
@@ -21,6 +21,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#0a0c11}
 </style></head><body><div id="map"></div>
 <script>
 var map = document.getElementById('map');
+var original = document.title;
 var last = 0, busy = false, dead = 0;
 function tick(now) {
   requestAnimationFrame(tick);
@@ -29,7 +30,7 @@ function tick(now) {
   fetch('frame', { cache: 'no-store' })
     .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
     .then(function (svg) { map.innerHTML = svg; dead = 0; })
-    .catch(function () { if (++dead === 20) document.title = 'lot-map (closed)'; })
+    .catch(function () { if (++dead === 20) document.title = original + ' (closed)'; })
     .finally(function () { busy = false; });
 }
 requestAnimationFrame(tick);
@@ -46,9 +47,9 @@ const originOf = (host: string): boolean => /^(?:127\.0\.0\.1|localhost)(?::\d+)
 
 /**
  * Frames on `127.0.0.1`, under a random path so another page cannot guess the address.
- * `frame` is called per request, so the drawing is always current.
+ * `frame` is called per request, so the drawing is always current; `title` names the window and is read per page load.
  */
-export function serveFrames(options: { frame: () => string; port?: number }): Promise<FrameServer> {
+export function serveFrames(options: { frame: () => string; port?: number; title?: () => string }): Promise<FrameServer> {
   const token = randomBytes(24).toString('hex')
   const prefix = `/${token}`
   const server = createServer((req, res) => {
@@ -67,7 +68,7 @@ export function serveFrames(options: { frame: () => string; port?: number }): Pr
       res.writeHead(308, { location: `${prefix}/`, ...HEADERS })
       return res.end()
     }
-    if (path === `${prefix}/`) return send(200, 'text/html; charset=utf-8', PAGE)
+    if (path === `${prefix}/`) return send(200, 'text/html; charset=utf-8', page(options.title?.() ?? 'lot-map'))
     if (path === `${prefix}/frame`) {
       try {
         return send(200, 'image/svg+xml; charset=utf-8', options.frame())

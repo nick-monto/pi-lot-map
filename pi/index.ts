@@ -2,9 +2,9 @@
 // Claude's pane is an HTML surface; this is the same board drawn in cells and theme colors.
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
-import { drawMap, setupFrom, shortModel } from '../hooks/map'
+import { clean, drawMap, setupFrom, shortModel } from '../hooks/map'
 import type { Setup } from '../hooks/map'
 import type { Board, Entry, StationId, Status } from '../types'
 import { classifyPi } from './classify'
@@ -25,7 +25,7 @@ type HostContext = {
     requestRender?: () => void
   }
   getContextUsage?: () => { percent?: number | null } | undefined
-  sessionManager?: { getBranch?: () => unknown[] }
+  sessionManager?: { getBranch?: () => unknown[]; getSessionName?: () => string | undefined; getSessionId?: () => string; getCwd?: () => string }
 }
 
 /** What a widget component receives; only these two members are used. */
@@ -265,13 +265,23 @@ export default function lotMap(host: Host): void {
 
   /** The same drawing, in a browser window: only the token path is served, and only to this machine. */
   async function openWeb(ctx: HostContext): Promise<void> {
+    // The window carries the session's name, or the folder it works in when the session has none, and the tail of
+    // its id, which tells two windows in one project apart and matches the end of the session's own file name.
+    // Read per page load, so a window opened again shows the name the session has by then.
+    const title = (): string => {
+      const manager = (current ?? ctx).sessionManager
+      const name = clean(manager?.getSessionName?.() ?? '', 80) || clean(basename(manager?.getCwd?.() ?? ''), 80)
+      const id = (manager?.getSessionId?.() ?? '').replace(/\W/g, '').slice(-8)
+      const label = [name, id === '' ? '' : `[${id}]`].filter(part => part !== '').join(' ')
+      return label === '' ? 'lot-map' : `lot-map: ${label}`
+    }
     if (web === undefined) {
       try {
-        web = await serveFrames({ port: config.webPort, frame: () => drawMap(board, now(), setup) })
+        web = await serveFrames({ port: config.webPort, title, frame: () => drawMap(board, now(), setup) })
       } catch {
         if (config.webPort !== 0) {
           try {
-            web = await serveFrames({ port: 0, frame: () => drawMap(board, now(), setup) })
+            web = await serveFrames({ port: 0, title, frame: () => drawMap(board, now(), setup) })
           } catch {
             // No port to be had.
           }
