@@ -50,6 +50,71 @@ test('every kind of call lands on its station', () => {
   expect(at('AskUserQuestion', {})).toBe('you')
 })
 
+test('a command behind a wrapper is read as the command it runs', () => {
+  const at = (command: string) => classify('Bash', { command }, STRANGER).station
+  for (const command of [
+    'sudo curl https://x.y',
+    'sudo -u deploy curl https://x.y',
+    'cat urls | xargs curl',
+    'cat urls | xargs -n 1 -P 4 curl -s',
+    'env A=1 curl x',
+    'timeout 5 curl x',
+    'timeout -s KILL 5 curl x',
+    'time curl x',
+    'nohup wget x',
+    'sudo env A=1 nice -n 5 curl x',
+    'git -C dir push',
+    'git -c http.proxy=p --git-dir=.git fetch',
+    'python -m pip install x',
+    'python3.12 -m pip install x',
+    'uv pip install x',
+    'uv add x',
+    'pipx install x',
+    'poetry install',
+    'npx -y create-foo',
+    'pnpm dlx foo',
+    'docker compose pull',
+    'docker --context prod compose -f a.yml pull',
+    'go get x',
+    'go mod download',
+    'apt-get install x',
+    'sudo apt install x',
+    'find . -exec curl {} \;',
+    'find . -name "*.url" -exec sudo curl {} +',
+  ]) expect(`${at(command)} ${command}`).toBe(`web ${command}`)
+
+  for (const command of [
+    'sudo cat /etc/hosts',
+    'find . -name "*.tmp" -exec rm {} \;',
+    'find . -type f | xargs grep x',
+    'rm -rf build',
+    'rmdir build',
+    'env A=1 ls',
+  ]) expect(`${at(command)} ${command}`).toBe(`files ${command}`)
+
+  for (const command of [
+    'find . -exec make {} \;',
+    'sudo make install',
+    'command -v curl',
+    'npx tsc',
+    'git -C dir status',
+    'python -m http.server',
+    'docker compose up',
+    'go build ./...',
+    'xargs',
+    'timeout 5',
+  ]) expect(`${at(command)} ${command}`).toBe(`shell ${command}`)
+
+  // The label is still the first word of the line, never one found further in.
+  expect(classify('Bash', { command: 'sudo --preserve-env=HOME -u bob curl x' }, STRANGER).label).toBe('sudo')
+  // A memory command behind a wrapper is the memory command.
+  expect(classify('Bash', { command: 'timeout 30 recall memory journal' }, SETUP)).toEqual({ station: 'memory', label: 'memory' })
+})
+
+test('an MCP name with doubled underscores reads with single spaces', () => {
+  expect(classify('mcp__my__server__tool', {}, STRANGER).label).toBe('my: server tool')
+})
+
 test('out of the box, memory is only what every install has', () => {
   const at = (tool: string, input: Record<string, unknown>) => classify(tool, input, STRANGER).station
   expect(at('Read', { file_path: '/Users/a/.claude/projects/p/memory/n.md' })).toBe('memory')
@@ -91,6 +156,10 @@ test('a password never reaches a label, even with a slash, a question mark or a 
   expect(label('https://host.com:8080/x?mail=a@b.com')).toBe('https')
   expect(label('https://host.com/x?mail=a@b.com')).toBe('host.com')
   expect(label('https://[::1]:8080/x')).toBe('[::1]:8080')
+  expect(label('https://[::1]/x?tok=@secret')).toBe('[::1]')
+  expect(label('https://[::1]/x?mail=a@b.com')).toBe('[::1]')
+  expect(label('https://[::1]:8080/x?mail=a@b.com')).toBe('[::1]:8080')
+  expect(label('https://[u:pa/ss@host.com/x')).toBe('https')
   expect(label('https://пример.рф/x')).toBe('пример.рф')
   expect(label('https://bad host/x')).toBe('https')
 })
@@ -161,7 +230,7 @@ test('hook helpers', () => {
   expect(stringsFor('en').stations.web).toBe('Network')
 })
 
-const LANGUAGES = ['en', 'ru', 'es', 'fr', 'de', 'it'] as const
+const LANGUAGES = ['en', 'ru', 'es', 'fr', 'de', 'it', 'pt'] as const
 
 test('every language has every word, in a table of its own', () => {
   const en = stringsFor('en')
@@ -175,7 +244,7 @@ test('every language has every word, in a table of its own', () => {
   expect(stringsFor('constructor').title).toBe(en.title)
 })
 
-for (const [language, row] of [['es', 'Archivos  b/content.py'], ['fr', 'Fichiers   b/content.py'], ['de', 'Dateien    b/content.py'], ['it', 'File      b/content.py']] as const) {
+for (const [language, row] of [['es', 'Archivos  b/content.py'], ['fr', 'Fichiers   b/content.py'], ['de', 'Dateien    b/content.py'], ['it', 'File      b/content.py'], ['pt', 'Ficheiros b/content.py']] as const) {
   test(`the pane speaks ${language}, its columns even`, { options: { language } }, async ($, on) => {
     on('clock.now', () => ({ value: 1_000_000 }))
     on('tool.call', () => ({ result: {} }))
@@ -776,4 +845,32 @@ test('a background task that failed leaves a fault on its station', { options: O
   const source = String((await ui.find({ type: 'Svg' }))?.props.source)
   await ui.unmount()
   expect(source.split('font-weight="700"').length - 1).toBe(1)
+})
+
+test('a typed slash command keeps a background task that is older than the rows kept, and its name is cleaned', { options: OWN }, async ($, on) => {
+  on('clock.now', () => ({ value: 1_000_000 }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }) as never)
+  on('skill.prompt', (_, e) => ({ text: e.text }) as never)
+  let n = 0
+  on('tool.call', () => ({ result: n++ === 0 ? { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b9' } : {} }) as never)
+
+  await $.tool.call({ tool: 'Bash', command: 'sleep 600', description: 'Ждать сборку', run_in_background: true })
+  for (let i = 0; i < 90; i++) await $.tool.call({ tool: i % 2 === 0 ? 'Read' : 'Bash', file_path: `/a/b/${i}.py`, command: 'make', description: `шаг ${i}` })
+  await $.skill.prompt({ skill: 'de\u001b[31mploy', text: '' } as never)
+
+  const running = async (): Promise<boolean> => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const found = (await ui.find({ type: 'Text', text: /Ждать сборку/ })) !== undefined
+    await ui.unmount()
+    return found
+  }
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /de \[31mploy/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\u001b/ })).toBeUndefined()
+  await ui.unmount()
+  expect(await running()).toBe(true)
+  await $.turn.start({ text: NOTICE('b9', 'completed'), turnId: 't2' } as never)
+  const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await after.find({ type: 'Text', text: /идёт/ })).toBeUndefined()
+  await after.unmount()
 })

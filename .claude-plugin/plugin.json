@@ -1,6 +1,6 @@
 {
   "name": "lot-map",
-  "version": "0.5.1",
+  "version": "0.5.3",
   "description": "A live map beside the chat: memory, files, shell, web, model, agents, skills and hooks light up as they are used",
   "author": {
     "name": "Aleksei Volodin",
@@ -24,7 +24,8 @@
         "es",
         "fr",
         "de",
-        "it"
+        "it",
+        "pt"
       ],
       "default": "en",
       "description": "The language of the labels on the map."

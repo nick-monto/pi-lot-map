@@ -1,6 +1,6 @@
 {
   "name": "lot-map",
-  "version": "0.4.1",
+  "version": "0.5.3",
   "description": "A live map of the work beside the chat: one plugin for Claude Code, pi and omp",
   "type": "module",
   "license": "MIT",
