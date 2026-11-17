@@ -44,7 +44,15 @@ claude --plugin-dir .
 
 It takes the place of an installed lot-map for that session and starts with the default options. Afterwards you may find the engine's types in `.claude-plugin/types/` and a `tsconfig.json` beside them, for your editor; both are ignored by git.
 
-CI runs all three on every pull request. On your first one a maintainer has to approve the run, so it may wait a little.
+The pi and omp extension has tests of its own, under Bun:
+
+```bash
+bun test pi
+```
+
+They end in `.spec.ts` on purpose: `claude plugin test` runs every `.test.ts` and `.test.tsx` in the folder, and allows a test to import only its sibling files and `claude-code`, while these import `bun:test`.
+
+CI runs all three, and the pi tests, on every pull request. On your first one a maintainer has to approve the run, so it may wait a little.
 
 ## A pull request
 
