@@ -1,6 +1,6 @@
 # The pi and omp extension's tests, under Bun: they import `bun:test`, which the Claude plugin's own
 # test harness does not allow, so they are kept out of its `.test.ts` pattern and run here.
-name: pi
+name: pi and omp tests
 
 on:
   pull_request:
@@ -11,11 +11,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: pi-${{ github.ref }}
+  group: pi-tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  pi:
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
