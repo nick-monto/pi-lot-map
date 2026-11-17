@@ -10,6 +10,51 @@ What changed in each version of lot-map, newest first. To get a new version, see
 - `/lot-map web` serves the pane's own SVG drawing to a browser window from `127.0.0.1`, under a random token path; a Chromium or Edge app window opens when one is installed, and nothing opens a window until asked. `webPort` and `browser` settings. The window is named after the session: `<name> [<session id>]`, the folder's name in place of the session name when it has none, and the tail of the id so two windows in one project are told apart; the name is read when the window loads, so a rename shows on the next `/lot-map web`.
 - Settings for the port live in `lot-map.json` under the host's agent folder; the Claude mod's options and files are unchanged.
 
+## 0.9.0 (2026-11-16)
+
+- Fixed: in iTerm2, `terminalView: picture` made iTerm2's memory grow without limit. iTerm2 keeps every picture it is sent until its tab is closed: measured in iTerm2 3.7.7, a moving map took about 2 MB a frame, 17 GB in five minutes. In iTerm2 the picture is now off and a line above the rows says so; `braille` gives the map there. kitty, Ghostty and other terminals keep the picture. For this the mod reads `TERM_PROGRAM` and `LC_TERMINAL`, which PRIVACY.md names. Reported by castigator. (#81, #82)
+- New option `contextCost`, off by default: a call's row says about how many tokens the context grew by with its answer, after its time (`85 ms +42k`), and the desktop map adds each station's sum to its count (`9 · 180k`). An estimate, shown one step late: the growth also holds the model's own words and what hooks added. Two or three calls in one step share it evenly, marked `~`; more get no figure. Contributed by Obsessi0n. (#80, #83)
+- A running row has a colour of its own, the theme's blue. It was in Claude's colour, which on a light theme stands next to the colour of a failed row, and a running call read as a failed one. The demo and the pictures in `docs/` show it. (#77)
+- SECURITY.md and README: two sentences set right. Contributed by lunar-me. (#78, #79)
+
+## 0.8.0 (2026-11-14)
+
+- New terminal view, `terminalView: braille`: the map above the rows in braille dots and letters, for a terminal that shows no pictures, such as Windows Terminal. With `background` on `solid` it stands on its own ground and reads in any pane. `text` stays the default. Contributed by Obsessi0n. (#52, #68)
+- New option `subagentNames`, off by default: a subagent's model step says which subagent it is, by the few words it was started with, up to 40 characters. With it on, the calls of two subagents never share a folded row. (#70, #71)
+- Fixed: a call still running, such as a background task, was pushed out of the list by sixteen newer rows while its station still beat on the map. It stays as the last row until it ends. Such rows take half the list at most; with more still running, the last is marked `+22` for the rest. (#72)
+- Shell commands land on the right station more often. A command inside `for … do`, `if … then`, `while`, `!` or `{ … }`, a line handed to `bash -c` or `eval`, and a command behind `watch` are read as the command itself. The text of a here-document is no longer read as commands, so a file written through one shows as Files. (#73)
+- More commands are known to reach the network: `kubectl`, `aws`, `gcloud`, `az`, `nmap`, HTTPie, `pip3.12`, bare `yarn`, `bun i`, and subcommands of `svn`, `hg`, `terraform`, `helm`, `deno`, `openssl` and `git`. (#73)
+- A command line is read up to its first 8,000 characters. Naming a call whose command is a 19,000-character script takes 0.4 ms where it took 15. (#73)
+- More built-in tools that lit Shell land by what they are for: an MCP server's resources on Memory or Network by their server, code intelligence on Files, what agents hand to each other on Agents, designs and published plugins on Network. Each label is the tool's name. Contributed by anand-krishanu. (#66)
+- PRINCIPLES.md: the terminal picture's frame has a cost test and its figures. A frame takes 19 to 20 ms with the map at work, which the page names as the one cost that is not small. (#74)
+- README: its opening says what local means: the mod sends nothing anywhere, and it is handed each call whole and takes names from it. PRIVACY.md says what `subagentNames` adds. (#74, #71)
+
+## 0.7.0 (2026-11-13)
+
+- In VS Code the line of now has three buttons. **Zoom out** and **Zoom in** draw the map at one of six widths, and **Hide map** folds the pane to one line; what you chose is kept for the next session. The desktop app and the terminal are as they were. Contributed by 5m0k3. (#57, #59)
+- The terminal picture follows the terminal: with `theme` on `auto` it is light on a light terminal that sets `COLORFGBG` (iTerm2, rxvt, Konsole), where it used to be dark on white. Where nothing says, it stays dark. Contributed by jwechsler. (#49)
+- Fixed in a terminal: the line of now had no colour of its own and was black on Claude Code's dark pane under a light profile. It takes the theme's text colour. (#58)
+- Built-in tools that lit Shell land by what they are for: the task list, plan mode and notifications on You, schedules and routines on Agents, the skill and plugin catalogue on Skills, an artifact's comments and data and Claude Projects on Network. Each label is the tool's name. Contributed by anand-krishanu. (#60)
+- The browser reached from a cloud session linked to your computer lights Browser, where it lit Network. Contributed by anand-krishanu. (#50)
+- README: the terminal picture needs Claude Code to draw in fullscreen, and how to turn that on; a section on the VS Code pane. (#58, #59)
+- New page, [PRINCIPLES.md](PRINCIPLES.md): six things the mod holds to, the test or check behind each, and what was measured. (#61)
+- PRIVACY.md and the README said a shell command's and a subagent's label may be the short description the model wrote; a monitor's is too, and they now say so. PRIVACY.md also has a paragraph on `COLORFGBG` and a line on the two values the VS Code pane keeps. (#61, #49, #59)
+- Inside: the check on every pull request also holds the mod to the list of what it hooks and calls, `scripts/surface.txt`; the marketplace has a description; the bug form asks whether the reporter will send a fix. (#61, #62, #63)
+
+## 0.6.0 (2026-11-12)
+
+- The rows under the map are one line each. A row used to be one string and wrapped when its label was long, so the rows slid sideways and changed height while the work went on. Now the words are cut at the pane's edge and the time stands in a column at the right. (#46)
+- A row with a long label has a `▸`: press it to read the row whole, and again to close it. One row is open at a time.
+- What took no time, such as a message arriving, shows a dash in the time column, and the answer's row shows how long the whole turn took.
+- The line of now says only what runs. In a terminal it also has the context percentage and the model at its right; beside the drawing it leaves them to the drawing. The model on that line was contributed by gandharvahardikar. (#41)
+- New option `textSize`: `caption`, `footnote` or `body` for the rows under the map.
+- New option `terminalView`: with `picture`, a terminal that shows pictures (iTerm2 3.5 and later, kitty, Ghostty) gets the map itself above the rows, painted by the mod from the same drawing as the desktop app's. Off by default. `cellShape` fits the picture to the terminal's cells. Contributed by buddyatkins. (#33)
+- New option `motion`: with `reduced`, nothing on the map flies, spreads or spins; a call still lights its station and its spoke, and what changes only fades. (#40)
+- The Russian line for when nothing runs is shorter: "Ожидание".
+- The demo and the screenshots are made again with the new rows.
+- README: the install in two steps, for when Claude Code answers that the plugin is not found in any marketplace; and what a search is called on the map. (#44, #39)
+- Inside: `hooks/map.ts` is split into `setup`, `palette`, `classify`, `draw` and `feed`, and still hands the same names on; a check validates and tests every pull request and every push to `main` and `next`. (#45, #35, #43)
+
 ## 0.5.3 (2026-11-12)
 
 - Portuguese labels: `language` takes `pt`. Contributed by Obsessi0n. (#31)

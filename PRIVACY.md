@@ -2,7 +2,7 @@
 
 lot-map is a mod for Claude Code that draws a map of the work in a pane beside the chat. It runs inside Claude Code on your computer. There is no lot-map service, no account and no server: nothing the mod sees leaves your machine through it.
 
-This page describes version 0.5.3. It changes only together with the code, and the [changelog](CHANGELOG.md) says when it did.
+This page describes version 0.9.0. It changes only together with the code, and the [changelog](CHANGELOG.md) says when it did.
 
 ## What the mod is handed
 
@@ -12,18 +12,22 @@ The mod does not look for personal data and has no use for it. It takes a name f
 
 - a file: the last two parts of its path;
 - a web address: the host alone, without a login, password, path or query;
-- a shell command: the short description Claude wrote for it, or the command's name, never the command line;
+- a shell command or a monitor: the short description Claude wrote for it, or the command's name, never the command line;
+- a search: the tool's name for `Grep` and `Glob`, the words `web search` for a web search and `loading tools` for a tool search, in the map's language, never the pattern or the query;
 - a memory call: the tool's name and a record number or short identifier, never the text or the query;
-- a subagent: the short description it was started with;
-- those two descriptions are written by the model, and the mod shows them as written, up to 120 characters: it does not check what they say;
+- a subagent: the short description it was started with; with `subagentNames` on, its first 40 characters on that subagent's model steps as well;
+- those descriptions are written by the model, and the mod shows them as written, up to 120 characters: it does not check what they say;
 - a background task's report: that it ended and whether it failed;
 - a hook's refusal: the name of the tool it stopped, and its first line only if you turn `hookReasons` on;
 - context a hook added: that it was added, and record numbers only if you turn `hookRecords` on.
 
+The mod asks for three things by itself, all environment variables, and only for the map in a terminal. `COLORFGBG`, with `terminalView` set to `picture` or `braille` and `theme` on `auto`: it holds the terminal's colour numbers, by which the map above the rows is painted light or dark. `TERM_PROGRAM` and `LC_TERMINAL`, with `terminalView` set to `picture`: they name the terminal program, and in iTerm2 the picture stays off. The mod keeps the two answers for the session, light or dark and iTerm2 or not, and nothing else from them, and reads no other variable.
+
 ## What it keeps
 
-- **During a session:** the rows of the map, the counters under the stations and the last model step, in Claude Code's state for the session. They are gone when the session ends.
+- **During a session:** the rows of the map, which of them you opened to read whole, the counters under the stations and the last model step, in Claude Code's state for the session. With `contextCost` on, also a number of tokens on a row and a sum per station: how much the context grew, taken from the same figure as the ring's percentage. They are gone when the session ends.
 - **Between sessions:** one value per folder, the name of the model last used there, so that the map can show a change of model. It is stored under the folder's full path in Claude Code's own store for the plugin, on your computer. A folder's path usually contains your account name.
+- **Between sessions, from the VS Code pane:** how far you zoomed the map out and whether you hid it, a number and a yes or no, the same for every folder. They are in the same store and say nothing of what the map showed.
 - **Your options** (language, colours, memory servers and the rest) are kept by Claude Code in your settings, as for any plugin.
 
 To remove what it keeps, uninstall the plugin.
@@ -33,9 +37,11 @@ To remove what it keeps, uninstall the plugin.
 - It makes no network requests and has no telemetry, analytics or crash reports.
 - It reads no files and runs no processes.
 - It calls no model and adds nothing to the conversation.
+- With `terminalView` set to `picture`, in a terminal that shows pictures it paints the map's picture itself, from the same rows, and hands it to Claude Code to draw in the pane. The picture holds nothing the map does not show.
+- With `terminalView` set to `braille`, it draws the map as cells of text, from the same rows. The cells hold the stations' names and counts, the name in the centre, the model's name and the context percentage, and no label of any row.
 - It changes no tool call, result, prompt or context. It sees what your settings hooks decide about a call, hands that decision on as it was, and decides nothing about permissions itself.
 
-The code that takes names from a call is `classify` in [`hooks/map.ts`](hooks/map.ts); the hooks are in [`hooks/register.tsx`](hooks/register.tsx).
+The code that takes names from a call is `classify` in [`hooks/classify.ts`](hooks/classify.ts); the hooks are in [`hooks/register.tsx`](hooks/register.tsx).
 
 ## Where the code comes from
 

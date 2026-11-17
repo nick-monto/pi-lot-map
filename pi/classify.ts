@@ -1,6 +1,7 @@
 // Which station a pi/omp tool call belongs to, and what to call it. Labels carry names, never content.
-import { hostOf, isMemoryPath as isKnownMemoryPath, lastTwo, classifyShell } from '../hooks/map'
-import type { Classified, Setup } from '../hooks/map'
+import { hostOf, isMemoryPath as isKnownMemoryPath, lastTwo, classifyShell } from '../hooks/classify'
+import type { Classified } from '../hooks/classify'
+import type { Setup } from '../hooks/setup'
 
 /** The path a tool works on, whatever the host calls the field. */
 const pathOf = (input: Record<string, unknown>): string => {

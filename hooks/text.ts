@@ -7,6 +7,11 @@ export type Strings = {
   command: string
   opened: string
   cannotOpen: (reason: string) => string
+  /** The pane's buttons in an editor, where the pane cannot be made taller. */
+  zoomOut: string
+  zoomIn: string
+  hideMap: string
+  showMap: string
   stations: Record<StationId, string>
   newMessage: string
   answerReady: string
@@ -25,6 +30,8 @@ export type Strings = {
   running: string
   nothingYet: string
   noCounts: string
+  /** In place of the terminal picture, in a terminal that keeps every picture it is sent. */
+  noPictureHere: string
   idle: string
   context: string
   andMore: (n: number) => string
@@ -45,6 +52,10 @@ const en: Strings = {
   command: 'Open the work map beside the chat',
   opened: 'Work map opened.',
   cannotOpen: reason => `Nowhere to show the map right now: ${reason}`,
+  zoomOut: 'Zoom out',
+  zoomIn: 'Zoom in',
+  hideMap: 'Hide map',
+  showMap: 'Show map',
   stations: {
     you: 'You',
     model: 'Model',
@@ -74,6 +85,7 @@ const en: Strings = {
   running: 'running',
   nothingYet: 'Nothing yet.',
   noCounts: 'No counts yet.',
+  noPictureHere: "No picture in iTerm2: it keeps every frame in memory. See the README.",
   idle: 'Nothing is running.',
   context: 'context',
   andMore: n => ` and ${n} more`,
@@ -94,6 +106,10 @@ const ru: Strings = {
   command: 'Открыть карту работы рядом с чатом',
   opened: 'Карта работы открыта.',
   cannotOpen: reason => `Карту сейчас негде показать: ${reason}`,
+  zoomOut: 'Уменьшить',
+  zoomIn: 'Увеличить',
+  hideMap: 'Скрыть карту',
+  showMap: 'Показать карту',
   stations: {
     you: 'Ты',
     model: 'Модель',
@@ -123,7 +139,8 @@ const ru: Strings = {
   running: 'идёт',
   nothingYet: 'Пока ничего не было.',
   noCounts: 'Счётчики пусты.',
-  idle: 'Сейчас ничего не выполняется.',
+  noPictureHere: "В iTerm2 картинки нет: он держит в памяти каждый кадр. См. README.",
+  idle: 'Ожидание',
   context: 'контекст',
   andMore: n => ` и ещё ${n}`,
   webSearch: 'поиск в сети',
@@ -143,6 +160,10 @@ const es: Strings = {
   command: 'Abrir el mapa de trabajo junto al chat',
   opened: 'Mapa de trabajo abierto.',
   cannotOpen: reason => `Ahora no hay dónde mostrar el mapa: ${reason}`,
+  zoomOut: 'Alejar',
+  zoomIn: 'Acercar',
+  hideMap: 'Ocultar mapa',
+  showMap: 'Mostrar mapa',
   stations: {
     you: 'Tú',
     model: 'Modelo',
@@ -172,6 +193,7 @@ const es: Strings = {
   running: 'en curso',
   nothingYet: 'Todavía nada.',
   noCounts: 'Aún no hay recuentos.',
+  noPictureHere: "Sin imagen en iTerm2: guarda en memoria cada fotograma. Ver el README.",
   idle: 'No hay nada en ejecución.',
   context: 'contexto',
   andMore: n => ` y ${n} más`,
@@ -192,6 +214,10 @@ const fr: Strings = {
   command: 'Ouvrir la carte du travail à côté du chat',
   opened: 'Carte du travail ouverte.',
   cannotOpen: reason => `Impossible d'afficher la carte pour le moment : ${reason}`,
+  zoomOut: 'Dézoomer',
+  zoomIn: 'Zoomer',
+  hideMap: 'Masquer la carte',
+  showMap: 'Afficher la carte',
   stations: {
     you: 'Vous',
     model: 'Modèle',
@@ -221,6 +247,7 @@ const fr: Strings = {
   running: 'en cours',
   nothingYet: 'Rien pour le moment.',
   noCounts: 'Aucun compteur pour le moment.',
+  noPictureHere: "Pas d'image dans iTerm2 : il garde chaque image en mémoire. Voir le README.",
   idle: 'Rien en cours.',
   context: 'contexte',
   andMore: n => ` et ${n} de plus`,
@@ -241,6 +268,10 @@ const de: Strings = {
   command: 'Arbeitskarte neben dem Chat öffnen',
   opened: 'Arbeitskarte geöffnet.',
   cannotOpen: reason => `Die Karte kann gerade nirgends angezeigt werden: ${reason}`,
+  zoomOut: 'Verkleinern',
+  zoomIn: 'Vergrößern',
+  hideMap: 'Karte ausblenden',
+  showMap: 'Karte zeigen',
   stations: {
     you: 'Du',
     model: 'Modell',
@@ -270,6 +301,7 @@ const de: Strings = {
   running: 'läuft',
   nothingYet: 'Noch nichts.',
   noCounts: 'Noch keine Zählerstände.',
+  noPictureHere: "Kein Bild in iTerm2: Es behält jedes Einzelbild im Speicher. Siehe README.",
   idle: 'Nichts läuft.',
   context: 'Kontext',
   andMore: n => ` und ${n} weitere`,
@@ -290,6 +322,10 @@ const it: Strings = {
   command: 'Apri la mappa del lavoro accanto alla chat',
   opened: 'Mappa del lavoro aperta.',
   cannotOpen: reason => `Al momento non c'è dove mostrare la mappa: ${reason}`,
+  zoomOut: 'Riduci',
+  zoomIn: 'Ingrandisci',
+  hideMap: 'Nascondi mappa',
+  showMap: 'Mostra mappa',
   stations: {
     you: 'Tu',
     model: 'Modello',
@@ -319,6 +355,7 @@ const it: Strings = {
   running: 'in corso',
   nothingYet: 'Ancora niente.',
   noCounts: 'Ancora nessun conteggio.',
+  noPictureHere: "Nessuna immagine in iTerm2: tiene in memoria ogni fotogramma. Vedi il README.",
   idle: 'Niente in esecuzione.',
   context: 'contesto',
   andMore: n => ` e altri ${n}`,
@@ -340,6 +377,10 @@ const pt: Strings = {
   command: 'Abrir o mapa de trabalho ao lado do chat',
   opened: 'Mapa de trabalho aberto.',
   cannotOpen: reason => `De momento não há onde mostrar o mapa: ${reason}`,
+  zoomOut: 'Reduzir',
+  zoomIn: 'Ampliar',
+  hideMap: 'Ocultar mapa',
+  showMap: 'Mostrar mapa',
   stations: {
     you: 'Tu',
     model: 'Modelo',
@@ -369,6 +410,7 @@ const pt: Strings = {
   running: 'em curso',
   nothingYet: 'Ainda nada.',
   noCounts: 'Ainda sem contagens.',
+  noPictureHere: "Sem imagem no iTerm2: ele guarda cada quadro na memória. Veja o README.",
   idle: 'Nada em execução.',
   context: 'contexto',
   andMore: n => ` e mais ${n}`,
