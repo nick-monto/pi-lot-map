@@ -1,6 +1,6 @@
 // The map as a terminal widget: a small ring of stations over a feed of the newest rows.
 // Colors come from the host's theme, so a light terminal reads as well as a dark one.
-import { STATIONS, describeNow, foldRows, formatMs, shortModel } from '../hooks/map'
+import { STATIONS, describeNow, foldRows, formatMs, formatTokens, shortModel } from '../hooks/map'
 import type { Setup } from '../hooks/map'
 import type { Board, Entry, StationId } from '../types'
 
@@ -199,18 +199,19 @@ const MARK: Record<string, string> = { run: '●', ok: '·', err: '✕', block: 
 
 function feedLines(board: Board, now: number, setup: Setup, width: number, rows: number, paint: Paint): string[] {
   const { t } = setup
-  const shown = foldRows(board.entries, rows)
+  const shown = foldRows(board.entries, rows, setup.subagentNames)
   if (shown.length === 0) return [paint('dim', clip(t.nothingYet, width))]
 
   const column = Math.min(9, Math.max(...Object.values(t.stations).map(name => [...name].length)))
-  return shown.map(({ entry, times }) => {
+  return shown.map(({ entry, times, tokens, isShared }) => {
     const isSwitch = entry.mark === 'switch'
     const mark = isSwitch ? '◆' : (MARK[entry.status] ?? '·')
     const took = entry.endedAt === undefined ? formatMs(now - entry.startedAt, t) : entry.endedAt > entry.startedAt ? formatMs(entry.endedAt - entry.startedAt, t) : ''
+    const cost = setup.contextCost && tokens !== undefined ? ` ${isShared ? '~' : ''}+${formatTokens(tokens)}` : ''
     const more = times > 1 ? ` +${times - 1}` : ''
     const station = t.stations[entry.station]
     const left = `${mark} ${station.padEnd(column)} `
-    const right = `${more}${took === '' ? '' : `  ${took}`}`
+    const right = `${more}${took === '' ? '' : `  ${took}`}${cost}`
     const room = Math.max(4, width - plainLength(left) - plainLength(right))
     const label = clip(entry.label, room)
     const color = isSwitch || entry.status === 'run' ? 'accent' : entry.status === 'ok' ? 'dim' : 'error'

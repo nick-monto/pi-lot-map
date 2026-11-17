@@ -24,7 +24,7 @@ type HostContext = {
     theme?: { fg?: (color: string, text: string) => string }
     requestRender?: () => void
   }
-  getContextUsage?: () => { percent?: number | null } | undefined
+  getContextUsage?: () => { percent?: number | null; tokens?: number | null } | undefined
   sessionManager?: { getBranch?: () => unknown[]; getSessionName?: () => string | undefined; getSessionId?: () => string; getCwd?: () => string }
 }
 
@@ -42,6 +42,11 @@ type Config = { view: 'auto' | 'map' | 'feed'; enabled: boolean; placement: 'abo
 const KEY = 'lot-map'
 const KEEP = 80
 const TICK_MS = 150
+/**
+ * One turn's growth of the context is shared evenly among its calls when there are at most this many. With more, an
+ * even share says too little: a large read and a short command would each show the same. Their rows then get no figure.
+ */
+const SHARED_AT_MOST = 3
 
 const isOmp = (ctx: HostContext): boolean => typeof ctx.agent?.kind === 'string'
 const isMain = (ctx: HostContext): boolean => ctx.agent?.kind !== 'sub'
@@ -116,6 +121,10 @@ export default function lotMap(host: Host): void {
   let stopTicker: (() => void) | undefined
   let lastActivity = 0
   let turnEntry: string | undefined
+  /** With `contextCost`: the context's size as the last turn left it, and the calls whose answers the next turn is sent with. */
+  let lastTokens: number | undefined
+  let answered: string[] = []
+  let waiting: string[] = []
   let web: FrameServer | undefined
   /** A subagent's own extension instance keeps no board: the parent draws it from the task frames. */
   let serving = true
@@ -222,13 +231,42 @@ export default function lotMap(host: Host): void {
     }
   }
 
-  function context(): Pick<Board, 'context'> {
+  /** How full the context window is and how many tokens it holds: the engine's own meter, the same one the centre shows. */
+  function reading(): { patch: Pick<Board, 'context'>; tokens?: number } {
     try {
-      const percent = current?.getContextUsage?.()?.percent
-      return typeof percent === 'number' ? { context: percent } : {}
+      const usage = current?.getContextUsage?.()
+      const patch = typeof usage?.percent === 'number' ? { context: usage.percent } : {}
+      return typeof usage?.tokens === 'number' && usage.tokens > 0 ? { patch, tokens: usage.tokens } : { patch }
     } catch {
-      return {}
+      return { patch: {} }
     }
+  }
+
+  /**
+   * What one turn added to the context, put on the calls whose answers the turn was sent with. The calls of a turn show
+   * in the reading taken at the end of the next one, so a figure arrives one step late, as the README says; the growth
+   * also holds the model's own words and what an extension added. A context that shrank, as at a compaction, puts
+   * nothing anywhere. One call takes all of it; up to SHARED_AT_MOST share it evenly, marked as shared. Past that the
+   * rows get nothing, but when every call was at one station that station's sum gets it whole.
+   */
+  function charge(calls: readonly string[], before: number | undefined, after: number | undefined): void {
+    if (before === undefined || after === undefined || calls.length === 0 || after <= before) return
+    const grown = after - before
+    const own = board.entries.filter(e => calls.includes(e.id))
+    if (own.length === 0) return
+    const share = own.length <= SHARED_AT_MOST ? grown / own.length : undefined
+    const spent = { ...board.spent }
+    const add = (station: StationId, tokens: number): void => {
+      spent[station] = Math.round((spent[station] ?? 0) + tokens)
+    }
+    if (share !== undefined) for (const e of own) add(e.station, share)
+    else if (new Set(own.map(e => e.station)).size === 1 && own[0] !== undefined) add(own[0].station, grown)
+    board = {
+      ...board,
+      spent,
+      entries: share === undefined ? board.entries : board.entries.map(e => (calls.includes(e.id) ? { ...e, tokens: Math.round(share), ...(own.length > 1 ? { shared: true } : {}) } : e)),
+    }
+    kick()
   }
 
   function attach(ctx: HostContext): void {
@@ -276,11 +314,11 @@ export default function lotMap(host: Host): void {
     }
     if (web === undefined) {
       try {
-        web = await serveFrames({ port: config.webPort, title, frame: () => drawMap(board, now(), setup) })
+        web = await serveFrames({ port: config.webPort, title, frame: () => drawMap(board, now(), setup, true) })
       } catch {
         if (config.webPort !== 0) {
           try {
-            web = await serveFrames({ port: 0, title, frame: () => drawMap(board, now(), setup) })
+            web = await serveFrames({ port: 0, title, frame: () => drawMap(board, now(), setup, true) })
           } catch {
             // No port to be had.
           }
@@ -306,7 +344,10 @@ export default function lotMap(host: Host): void {
 
   function toolStarted(event: ToolStart): void {
     const seen = classifyPi(event.toolName ?? 'tool', event.args ?? {}, setup)
-    toolEntries.set(event.toolCallId ?? '', begin({ ...seen, from: 'core' }))
+    const id = begin({ ...seen, from: 'core' })
+    toolEntries.set(event.toolCallId ?? '', id)
+    // A subagent's calls fill its own context, which the engine does not report: only the main loop's are counted.
+    if (setup.contextCost) waiting.push(id)
   }
 
   function toolEnded(event: ToolEnd): void {
@@ -352,6 +393,9 @@ export default function lotMap(host: Host): void {
 
   host.on('turn_start', (event: { turnIndex?: number }, ctx) => {
     if (!isMain(ctx)) return
+    // The calls whose answers this turn is sent with: those made since the last one. A call this turn starts is the next turn's.
+    answered = waiting
+    waiting = []
     const model = ctx.model?.id
     const step = (event.turnIndex ?? 0) + 1
     turnEntry = begin({
@@ -363,8 +407,13 @@ export default function lotMap(host: Host): void {
 
   host.on('turn_end', (_event, ctx) => {
     if (!isMain(ctx)) return
-    finish(turnEntry, 'ok', context())
+    const read = reading()
+    finish(turnEntry, 'ok', read.patch)
     turnEntry = undefined
+    if (setup.contextCost) {
+      charge(answered, lastTokens, read.tokens)
+      lastTokens = read.tokens
+    }
   })
 
   host.on('model_select', (event: { previousModel?: { id?: string }; model?: { id?: string } }, ctx) => {
@@ -390,6 +439,8 @@ export default function lotMap(host: Host): void {
 
   host.on('agent_end', (_event, ctx) => {
     if (!isMain(ctx)) return
+    // A call's growth would show only in the next turn's first reading, beside the next message: none arrives here.
+    waiting = []
     const last = board.entries[board.entries.length - 1]
     if (last?.mark !== 'done') begin({ station: 'you', label: setup.t.answerReady, status: 'ok', mark: 'done' })
     settleStale()
@@ -398,7 +449,11 @@ export default function lotMap(host: Host): void {
   host.on('session_compact', (_event, ctx) => {
     if (!isMain(ctx)) return
     const id = begin({ station: 'model', label: setup.t.compacting })
-    finish(id, 'ok', context())
+    // After a compaction the context starts again: no call before it gets a figure, and the next turn only sets the mark.
+    answered = []
+    waiting = []
+    lastTokens = undefined
+    finish(id, 'ok', reading().patch)
   })
 
   // omp only: a tool waiting on the person's approval, and how it was answered.

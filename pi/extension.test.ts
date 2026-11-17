@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { drawMap, setupFrom } from '../hooks/map'
 import type { Board } from '../types'
@@ -94,4 +97,75 @@ test('the shared drawing still gives the browser view a whole SVG', () => {
   expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"')
   expect(svg.trimEnd().endsWith('</svg>')).toBe(true)
   expect(svg).toContain('>OMP<')
+})
+
+test('subagentNames keeps two subagents’ calls out of one folded row', () => {
+  const two: Board = {
+    entries: [
+      { id: '1', station: 'files', label: 'a.ts', from: 'agents', agentId: 'A', startedAt: 1_000, endedAt: 1_100, status: 'ok' },
+      { id: '2', station: 'files', label: 'b.ts', from: 'agents', agentId: 'B', startedAt: 1_200, endedAt: 1_300, status: 'ok' },
+    ],
+    counts: { files: 2 },
+  }
+  const rows = (s: typeof setup) => renderWidget(two, 2_000, s, 60, 'feed', (_color, text) => text)
+  expect(rows(setup)).toHaveLength(2)
+  expect(rows(setupFrom({ subagentNames: true }))).toHaveLength(3)
+})
+
+test('with contextCost a row says what it added to the context, marked shared when a turn’s growth is split', () => {
+  const paid: Board = {
+    entries: [
+      { id: '1', station: 'files', label: 'a.ts', from: 'core', startedAt: 1_000, endedAt: 1_085, status: 'ok', tokens: 42_000 },
+      { id: '2', station: 'shell', label: 'b', from: 'core', startedAt: 1_100, endedAt: 1_150, status: 'ok', tokens: 14_000, shared: true },
+    ],
+    counts: { files: 2 },
+  }
+  const lines = (s: typeof setup) => renderWidget(paid, 2_000, s, 60, 'feed', (_color, text) => text).join('\n')
+  expect(lines(setup)).not.toContain('+42k')
+  expect(lines(setupFrom({ contextCost: true }))).toContain('85 ms +42k')
+  expect(lines(setupFrom({ contextCost: true }))).toContain('~+14k')
+})
+
+test('a turn’s growth lands on the calls it answered, one turn later', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lot-map-'))
+  const settings = join(dir, 'lot-map.json')
+  writeFileSync(settings, JSON.stringify({ enabled: true, view: 'feed', contextCost: true }))
+  process.env.LOT_MAP_CONFIG = settings
+  try {
+    const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>()
+    let widget: ((surface: unknown) => { render: (width: number) => string[] }) | undefined
+    const ctx = {
+      hasUI: true,
+      agent: { kind: 'main' },
+      model: { id: 'm' },
+      getContextUsage: () => ({ tokens, percent: tokens / 1_000, contextWindow: 100_000 }),
+      ui: {
+        setWidget: (_key: string, content: unknown) => {
+          widget = content as typeof widget
+        },
+        notify: () => {},
+      },
+    }
+    let tokens = 1_000
+    lotMap({ on: (name, handler) => void handlers.set(name, handler), registerCommand: () => {} } as unknown as Parameters<typeof lotMap>[0])
+    const fire = async (name: string, event: unknown): Promise<void> => {
+      await handlers.get(name)?.(event, ctx)
+    }
+
+    await fire('session_start', {})
+    await fire('turn_start', { turnIndex: 0 })
+    await fire('tool_execution_start', { toolCallId: 'a', toolName: 'read', args: { path: 'a.ts' } })
+    await fire('tool_execution_end', { toolCallId: 'a', toolName: 'read' })
+    await fire('turn_end', {})
+    tokens = 1_500
+    await fire('turn_start', { turnIndex: 1 })
+    await fire('turn_end', {})
+
+    expect(widget).toBeDefined()
+    const shown = widget!({ terminal: { rows: 40 }, requestRender: () => {} }).render(60).join('\n')
+    expect(shown).toContain('+500')
+  } finally {
+    delete process.env.LOT_MAP_CONFIG
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
