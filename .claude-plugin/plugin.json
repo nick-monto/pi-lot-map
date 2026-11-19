@@ -1,6 +1,6 @@
 {
   "name": "lot-map",
-  "version": "0.9.0",
+  "version": "0.11.0",
   "description": "A live map beside the chat: memory, files, shell, web, model, agents, skills and hooks light up as they are used",
   "author": {
     "name": "Aleksei Volodin",
@@ -73,6 +73,13 @@
       "default": [],
       "description": "Short names for memory tools, each written as tool=name. A tool without one goes by its own name."
     },
+    "serverStations": {
+      "type": "string",
+      "multiple": true,
+      "title": "Servers on a station",
+      "default": [],
+      "description": "Put an MCP server's tools on a station of the map, each written as server=station. The stations are files, shell, web, browser, agents, skills and you. Memory keeps memoryServers, which wins if a server is in both. A server without an entry, or with an unknown station, goes where the mod puts it."
+    },
     "hookRecords": {
       "type": "boolean",
       "title": "Hooks add numbered records",
@@ -85,6 +92,12 @@
       "default": false,
       "description": "Show the first line of a hook's refusal, up to 72 characters. Off, the map says only which tool was stopped: a refusal may quote what the hook found."
     },
+    "guardedHooks": {
+      "type": "boolean",
+      "title": "Hooks a guard skips",
+      "default": true,
+      "description": "Turn off on a Team or Enterprise login where the transcript gets notices that a lot-map hook was skipped. The map then loses the Hooks station, the records a hook adds, the row of a typed slash command and the mark of a compaction; everything else stays."
+    },
     "subagentNames": {
       "type": "boolean",
       "title": "Name subagents in the rows",
@@ -95,7 +108,17 @@
       "type": "boolean",
       "title": "What each call adds to the context",
       "default": false,
-      "description": "Each row says about how many tokens the context grew by with its call's answer, and the desktop map adds each station's sum to its count. An estimate: the growth of one model step, which also holds the model's own words, what hooks added and, at the start of a turn, the message, shared among that step's calls. It shows one step late, and a call whose step was the last of a turn gets none."
+      "description": "Each row says about how many tokens the context grew by with its call's answer, and the map adds each station's sum to its count. An estimate: the growth of one model step, which also holds the model's own words, what hooks added and, at the start of a turn, the message, shared among that step's calls. It shows one step late, and a call whose step was the last of a turn gets none."
+    },
+    "contextWindow": {
+      "type": "string",
+      "title": "What the ring measures against",
+      "options": [
+        "model",
+        "compaction"
+      ],
+      "default": "model",
+      "description": "What the ring around the centre and its percentage measure the context against: model, the model's whole window, as the status line does; or compaction, the auto-compact window, such as one set with autoCompactWindow, where it is smaller than the model's. Without one, or with auto-compaction off, compaction shows the same as model."
     },
     "theme": {
       "type": "string",
@@ -117,6 +140,12 @@
       ],
       "default": "solid",
       "description": "The map's own background, or transparent, which lets the pane behind it show through."
+    },
+    "paneBackground": {
+      "type": "string",
+      "title": "Pane background",
+      "default": "theme",
+      "description": "What the pane is painted with: theme, Claude Code's own; transparent, which lets the terminal behind it show through; or a colour written as #rrggbb."
     },
     "colors": {
       "type": "string",
@@ -155,6 +184,16 @@
       ],
       "default": "footnote",
       "description": "The size of the rows under the map: caption is smaller, body larger. A terminal has one size and ignores it."
+    },
+    "logRows": {
+      "type": "string",
+      "title": "Rows under the map",
+      "options": [
+        "16",
+        "fill"
+      ],
+      "default": "16",
+      "description": "How many rows the list under the map shows: 16, or fill, as many as the pane has room for below the map, never fewer than 16. Fill is for the desktop app's docked pane; a terminal, the editor and the mobile app keep 16."
     },
     "terminalView": {
       "type": "string",

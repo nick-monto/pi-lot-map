@@ -52,7 +52,7 @@ bun test pi
 
 They end in `.spec.ts` on purpose: `claude plugin test` runs every `.test.ts` and `.test.tsx` in the folder, and allows a test to import only its sibling files and `claude-code`, while these import `bun:test`.
 
-CI runs all three, and the pi tests, on every pull request. On your first one a maintainer has to approve the run, so it may wait a little.
+CI runs all three, and the pi tests, on every pull request. On your first one a maintainer has to approve the run, so it may wait a little. A second job, `latest`, runs them on the newest Claude Code: if it fails and `plugin` passes, the newer engine does something the tests did not expect, which is worth a line in your pull request and does not block it.
 
 ## A pull request
 
@@ -84,7 +84,10 @@ Please translate a language you speak.
 | `hooks/draw.ts` | the drawing (`drawMap`) |
 | `hooks/feed.ts` | the rows under the map |
 | `hooks/map.ts` | hands the five above on under their old address |
-| `hooks/register.tsx` | the hooks and the pane |
+| `hooks/register.tsx` | the hooks: what the mod listens to |
+| `hooks/board.ts` | the board the map is drawn from, and every write to it |
+| `hooks/pane.tsx` | the pane, drawn from the board |
+| `hooks/cost.ts` | the sums of `contextCost` |
 | `hooks/text.ts` | the words, one table per language |
 | `hooks/lot-map.test.tsx` | the tests |
 | `types/index.d.ts` | the board's shape |
@@ -92,4 +95,4 @@ Please translate a language you speak.
 
 ## Licence
 
-By contributing you agree that your work is published under the repository's [licence](LICENSE).
+By contributing you agree that your work is published under the repository's [licence](LICENSE). The pull request form asks you to confirm that the change is yours to give, and to name the source and the licence of anything in it that you copied or adapted.

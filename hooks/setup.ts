@@ -37,16 +37,24 @@ export type Setup = {
   memorySubcommands: ReadonlySet<string>
   memoryPaths: readonly string[]
   memoryLabels: ReadonlyMap<string, string>
+  /** MCP servers the person put on a station of their own choosing, by the server's name. Memory keeps `memoryServers`. */
+  serverStations: ReadonlyMap<string, StationId>
   hookRecords: boolean
   /** Whether the first line of a hook's refusal is shown. Off, the row names only the tool. */
   hookReasons: boolean
+  /** Whether the mod listens to the five events an organisation's guard keeps a mod away from. Off, it adds no hook on them. */
+  guardedHooks: boolean
   /** Whether a subagent's model step says which subagent it is, by the description it was started with. Off, it says only that it is one. */
   subagentNames: boolean
   /** Whether a row says about how much its call added to the context, and the desktop map each station's sum. */
   contextCost: boolean
+  /** What the ring and its percentage measure the context against: the model's whole window, or the auto-compact window where it is smaller. */
+  contextWindow: 'model' | 'compaction'
   theme: 'auto' | 'dark' | 'light'
   /** Whether the map paints its own ground, or leaves the surface it lies on showing through. */
   background: 'solid' | 'transparent'
+  /** What the pane is painted with: the surface's own, nothing, so what lies behind it shows through, or a color. */
+  paneBackground: 'theme' | 'transparent' | `#${string}`
   /** Colors the person set, by their place in the palette. They hold on any surface; the rest follows the theme. */
   colors: Partial<Palette>
   /** Who sits at the top of the ring: the person, or the network with the person at the bottom. */
@@ -55,6 +63,8 @@ export type Setup = {
   motion: 'full' | 'reduced'
   /** The size of the words under the map, a step on the surface's own scale. A terminal has one size. */
   textSize: 'caption' | 'footnote' | 'body'
+  /** How many rows the list under the map shows: 16, or as many as the desktop's docked pane has room for. */
+  logRows: 16 | 'fill'
   /** How the map looks in a terminal: the rows alone, as always, or above them the map's picture, or the map in braille dots. */
   terminalView: 'text' | 'picture' | 'braille'
   /** How many times taller a terminal cell is than it is wide: what sizes the picture's box of cells. The engine does not say. */
@@ -69,6 +79,9 @@ function cellShapeFrom(value: unknown): number {
   return Number.isFinite(n) && n >= 1.2 && n <= 4 ? n : CELL_SHAPE
 }
 
+/** The stations an MCP server may be put on. Memory has `memoryServers`; the model and the hooks are not where a tool runs. */
+const SERVER_STATIONS: readonly StationId[] = ['files', 'shell', 'web', 'browser', 'agents', 'skills', 'you']
+
 const list = (v: unknown): string[] =>
   (Array.isArray(v) ? v : typeof v === 'string' ? v.split(',') : []).map(x => String(x).trim()).filter(x => x !== '')
 
@@ -77,6 +90,12 @@ export function setupFrom(options: Readonly<Record<string, unknown>> = {}): Setu
   for (const pair of list(options.memoryLabels)) {
     const at = pair.indexOf('=')
     if (at > 0 && at < pair.length - 1) memoryLabels.set(pair.slice(0, at).trim(), pair.slice(at + 1).trim())
+  }
+  const serverStations = new Map<string, StationId>()
+  for (const pair of list(options.serverStations)) {
+    const at = pair.indexOf('=')
+    const station = SERVER_STATIONS.find(id => id === pair.slice(at + 1).trim())
+    if (at > 0 && station !== undefined) serverStations.set(pair.slice(0, at).trim(), station)
   }
   const core = typeof options.coreName === 'string' ? options.coreName.trim().slice(0, 10) : ''
   return {
@@ -87,19 +106,33 @@ export function setupFrom(options: Readonly<Record<string, unknown>> = {}): Setu
     memorySubcommands: new Set(list(options.memorySubcommands)),
     memoryPaths: list(options.memoryPaths),
     memoryLabels,
+    serverStations,
     hookRecords: options.hookRecords === true,
     hookReasons: options.hookReasons === true,
+    guardedHooks: !(options.guardedHooks === false || options.guardedHooks === 'false'),
     subagentNames: options.subagentNames === true,
     contextCost: options.contextCost === true,
+    contextWindow: options.contextWindow === 'compaction' ? 'compaction' : 'model',
     theme: options.theme === 'dark' || options.theme === 'light' ? options.theme : 'auto',
     background: options.background === 'transparent' ? 'transparent' : 'solid',
+    paneBackground: paneBackgroundFrom(options.paneBackground),
     colors: colorsFrom(options.colors),
     layout: options.layout === 'you-bottom' ? 'you-bottom' : 'you-top',
     motion: options.motion === 'reduced' ? 'reduced' : 'full',
     textSize: options.textSize === 'caption' || options.textSize === 'body' ? options.textSize : 'footnote',
+    logRows: options.logRows === 'fill' ? 'fill' : 16,
     terminalView: options.terminalView === 'picture' || options.terminalView === 'braille' ? options.terminalView : 'text',
     cellShape: cellShapeFrom(options.cellShape),
   }
+}
+
+/** `transparent`, or a color as `#rgb` or `#rrggbb`; anything else leaves the pane as the surface paints it. */
+function paneBackgroundFrom(v: unknown): Setup['paneBackground'] {
+  const value = typeof v === 'string' ? v.trim().toLowerCase() : ''
+  if (value === 'transparent') return 'transparent'
+  const digits = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(value)?.[1]
+  if (digits === undefined) return 'theme'
+  return `#${digits.length === 3 ? [...digits].map(d => d + d).join('') : digits}`
 }
 
 /**
