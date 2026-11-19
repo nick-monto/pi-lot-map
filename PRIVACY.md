@@ -1,6 +1,6 @@
 # Privacy
 
-lot-map is a mod for Claude Code that draws a map of the work in a pane beside the chat. It runs inside Claude Code on your computer. There is no lot-map service, no account and no server: nothing the mod sees leaves your machine through it.
+lot-map is a mod for Claude Code, and an extension for pi and omp, that draws a map of the work in a pane beside the chat or above the editor. It runs inside those hosts on your computer. There is no lot-map service and no account: nothing the mod sees leaves your machine through it, and the one thing it serves, the drawing, goes to your own browser on `127.0.0.1`.
 
 This page describes version 0.11.0. It changes only together with the code, and the [changelog](CHANGELOG.md) says when it did.
 
@@ -34,7 +34,15 @@ With `contextWindow` set to `compaction`, it also asks Claude Code how the conte
 
 To remove what it keeps, uninstall the plugin.
 
-## What it does not do
+## In pi and omp
+
+The same board is drawn above the editor by pi and omp. They hand the extension what Claude Code hands the mod, and it takes names from it by the same rules above, dropping the rest.
+
+It writes no file. Its options come from `lot-map.json` in the host's agent folder, `~/.pi/agent` or `~/.omp/agent`, or from the path in `LOT_MAP_CONFIG`; you write that file, and the extension reads it at a session's start and on `/reload`. Apart from that file and the browser it starts for `/lot-map web`, the extension reads no files and runs no processes.
+
+`/lot-map web` starts a server while a window asks it for frames: on `127.0.0.1`, at `webPort` or else a port the system picks, under a random path so another page cannot guess the address. It answers `GET` and `HEAD` only, refuses a request sent to any other name than this machine, and serves the page and the drawing, both made from rows already in memory; the page carries its own script and asks that server for the next frame, nothing else. To open it, the extension starts a browser already on the machine: an app window of Chromium or Edge when one is installed, the default browser otherwise, or the one named in the `browser` option. The server stops when the session ends.
+
+## What the Claude mod does not do
 
 - It makes no network requests and has no telemetry, analytics or crash reports.
 - It reads no files and runs no processes.
