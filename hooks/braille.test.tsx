@@ -4,7 +4,10 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Board, Entry } from '../types'
 import { ENDLESS_FOR_MS, FRAME_MS, brailleSize, nextFrameIn, packCells, paintBraille, placesOf, rowsOf } from './braille'
 import { STATIONS, drawMap, setupFrom } from './map'
-import { fromBase64 } from './raster'
+import { fromBase64 } from './png'
+
+// The tests of cost print their figures. The types a mod is checked against have no console, so the tests name it.
+declare const console: { log: (...args: unknown[]) => void }
 
 const PANE = {
   plugin: 'lot-map',
@@ -204,8 +207,8 @@ test('no label reaches the braille map: it holds the names of the stations, the 
 test('a core name in letters a cell cannot hold is written with question marks, and the pane keeps its map', { options: { ...BRAILLE, coreName: '日本語' } }, async ($, on) => {
   on('clock.now', () => ({ value: NOW }))
   expect(rowsOf(paintBraille(EMPTY, NOW, setupFrom({ coreName: '日本語' }), 60, 21)).join('\n')).toContain('???')
-  // Nor is a letter outside the basic plane, a control character, or a mark that stands on the letter before it.
-  expect(rowsOf(paintBraille(EMPTY, NOW, setupFrom({ coreName: 'a😀b\u0007x́' }), 60, 21)).join('\n')).toContain('a?b?x?')
+  // Nor is a letter outside the basic plane or a mark that stands on the letter before it. A control character never gets this far: the name is cleaned like a label, and it is a space.
+  expect(rowsOf(paintBraille(EMPTY, NOW, setupFrom({ coreName: 'a😀b\u0007x́' }), 60, 21)).join('\n')).toContain('a?b x?')
   // Latin with its accents, Greek and Cyrillic are a cell each.
   for (const name of ['ДОМ', 'Señor', 'Ωmega', 'Ação']) expect(rowsOf(paintBraille(EMPTY, NOW, setupFrom({ coreName: name }), 60, 21)).join('\n')).toContain(name)
 
@@ -448,4 +451,22 @@ test('principle 3: a frame of the braille map, painted and packed, stays within 
   console.log(`COST a braille frame of 76 by 21: painting ${(painting * 1000).toFixed(0)}us | painted and packed ${(whole * 1000).toFixed(0)}us | asking when the next is due ${(asking * 1000).toFixed(1)}us`)
   expect(whole).toBeLessThan(5)
   expect(asking).toBeLessThan(0.5)
+})
+
+test('a call still running stays on both maps, however many calls came after it', () => {
+  // A background task started long ago, and sixty calls begun and ended since: its row still says it runs.
+  const board = (entries: Entry[]): Board => ({ entries, counts: {} })
+  const later = Array.from({ length: 60 }, (_, i) => entry(i % 2 === 0 ? 'files' : 'model', NOW - 60_000 + i * 100))
+  const busy = board([running('shell', NOW - 600_000), ...later])
+  const idle = board([entry('shell', NOW - 600_000), ...later])
+  const setup = setupFrom({})
+
+  // The first drawing: the hands of the clock go round the station at work, and the core is lit.
+  expect(drawMap(busy, NOW, setup)).toContain('stroke-dashoffset')
+  expect(drawMap(idle, NOW, setup)).not.toContain('stroke-dashoffset')
+  // The braille map: the station is not drawn as one at rest, and it asks for the next beat's frame.
+  const dots = (b: Board): string => packCells(paintBraille(b, NOW, setup, 76, 21))
+  expect(dots(busy)).not.toBe(dots(idle))
+  expect(nextFrameIn(busy, NOW, setup)).toBe(400)
+  expect(nextFrameIn(idle, NOW, setup)).toBeUndefined()
 })

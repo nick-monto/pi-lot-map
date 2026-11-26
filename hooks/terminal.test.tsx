@@ -3,8 +3,10 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import type { Board, Entry } from '../types'
 import { TRAIL_FADE_MS, TRAIL_HOLD_MS, drawMap, setupFrom } from './map'
-import { ENDLESS_FOR_MS, FASTEST_MS, MAX_IMAGE_BYTES, endlessEvery, fromBase64, imageSource, nextChangeIn, paint, parseMap, valueAt } from './raster'
-import { isITerm2, schemeFrom } from './terminal'
+import { MAX_IMAGE_BYTES, fromBase64, imageSource } from './png'
+import { paint } from './raster'
+import { ENDLESS_FOR_MS, FASTEST_MS, endlessEvery, nextChangeIn, parseMap, valueAt } from './scene'
+import { SENT_A_SECOND, freesFrames, isITerm2, paceFor, schemeFrom } from './terminal'
 import { stringsFor } from './text'
 
 const PANE = {
@@ -216,7 +218,8 @@ test('the painted map has its ground, its words and its lit stations where the d
   expect(warm(running, 127, 346, 30)).toBe(false)
 })
 
-test('what never moves is painted once a drawing, and the frames come out as if every shape were painted each time', () => {
+// On a slow CI runner this has taken from 2.3 s to past the default 5 s; the time here is no budget, only room.
+test('what never moves is painted once a drawing, and the frames come out as if every shape were painted each time', { timeoutMs: 30_000 }, () => {
   const now = 1_000_000
   // An animation of nothing makes every shape one that moves, so the painter paints the drawing whole, frame after frame.
   const nothing = { kind: 'value', attr: 'nothing', values: [0], keyTimes: undefined, begin: 0, dur: 1, repeat: 1, freeze: false }
@@ -343,12 +346,13 @@ test('with terminalView picture, in a terminal the map is a picture above the ro
   // Sixty columns across, and as many rows as keep the map round on cells 2.4 times as tall as they are wide, as iTerm2's Monaco 12 draws them.
   expect(image?.props.columns).toBe(60)
   expect(image?.props.rows).toBe(23)
-  // A PNG, a small part of the frame's 1.8 MB of pixels.
-  const file = fromBase64((image?.props.source as { png: string }).png)
-  expect(file.length).toBeLessThan(200 * 1024)
+  // A PNG, a small part of the frame's 0.8 MB of pixels, and small enough to be sent five times a second.
+  const sent = (image?.props.source as { png: string }).png
+  expect(paceFor(sent.length)).toBeLessThanOrEqual(200)
+  const file = fromBase64(sent)
   expect(file.length).toBeLessThanOrEqual(MAX_IMAGE_BYTES)
   const { width, height, rgba } = unpng(file)
-  expect([width, height]).toEqual([690, 645])
+  expect([width, height]).toEqual([460, 430])
   // No ground of its own: where the map draws nothing, the terminal's background shows through.
   expect(pixel({ width, rgba }, 45, 45)[3]).toBe(0)
   expect(String(image?.props.alt)).toContain(stringsFor('ru').title)
@@ -382,9 +386,10 @@ test('a background colour of the person\'s own gives the terminal picture its gr
 
 test('the picture moves while something moves, and stands still at rest', { options: PICTURE, timeoutMs: 15_000 }, async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
-  const frames: { requestId: string; key: string }[] = []
+  const frames: { requestId: string; key: string; characters: number }[] = []
   on('ui.blit', (_, e) => {
-    frames.push({ requestId: e.requestId, key: e.key })
+    const source: { png?: string; rgba?: string } = 'source' in e ? (e.source as { png?: string; rgba?: string }) : {}
+    frames.push({ requestId: e.requestId, key: e.key, characters: (source.png ?? source.rgba ?? '').length })
     return { value: {} }
   })
   on('tool.call', () => ({ result: {} }))
@@ -399,6 +404,10 @@ test('the picture moves while something moves, and stands still at rest', { opti
   await clock.advance(1000)
   expect(frames.length).toBeGreaterThanOrEqual(probed + 4)
   expect(frames.length).toBeLessThanOrEqual(probed + 6)
+  // And no more in that second than a terminal is known to show (issue #110): the budget, and the frame that ends the second.
+  const inTheSecond = frames.slice(probed)
+  const sent = inTheSecond.reduce((sum, f) => sum + f.characters, 0)
+  expect(sent).toBeLessThanOrEqual(SENT_A_SECOND + Math.max(...inTheSecond.map(f => f.characters)))
   // Nothing runs, so once the station's glow has faded (3.2 s) the core's breath alone sends no frames.
   await clock.advance(3000)
   const landed = frames.length
@@ -464,7 +473,7 @@ for (const [what, variables, isLight] of [
   })
 }
 
-// ---- iTerm2 keeps every picture it is sent (issue #81): no picture there -----------------------------
+// ---- iTerm2 before 3.7.8 keeps every picture it is sent (issue #81): no picture there ----------------
 
 test('iTerm2 is known by TERM_PROGRAM in its own window and by LC_TERMINAL over ssh or inside tmux', () => {
   expect(isITerm2('iTerm.app', undefined)).toBe(true)
@@ -475,11 +484,28 @@ test('iTerm2 is known by TERM_PROGRAM in its own window and by LC_TERMINAL over 
   expect(isITerm2(undefined, undefined)).toBe(false)
 })
 
+test('iTerm2 frees its pictures from 3.7.8 on; a version it does not give counts as an earlier one', () => {
+  expect(freesFrames('3.7.8')).toBe(true)
+  expect(freesFrames('3.7.10')).toBe(true)
+  expect(freesFrames('3.8')).toBe(true)
+  expect(freesFrames('4.0.0')).toBe(true)
+  expect(freesFrames('3.7.8beta1')).toBe(true)
+  expect(freesFrames('3.7.7')).toBe(false)
+  expect(freesFrames('3.7')).toBe(false)
+  expect(freesFrames('3.6.9')).toBe(false)
+  expect(freesFrames('2.9.20')).toBe(false)
+  expect(freesFrames('')).toBe(false)
+  expect(freesFrames('nightly')).toBe(false)
+  expect(freesFrames(undefined)).toBe(false)
+})
+
 for (const [what, variables] of [
-  ['in its own window', { TERM_PROGRAM: 'iTerm.app' }],
-  ['over ssh or inside tmux', { TERM_PROGRAM: 'tmux', LC_TERMINAL: 'iTerm2' }],
+  ['3.7.7 in its own window', { TERM_PROGRAM: 'iTerm.app', TERM_PROGRAM_VERSION: '3.7.7' }],
+  ['of no version in its own window', { TERM_PROGRAM: 'iTerm.app' }],
+  ['3.7.7 over ssh or inside tmux', { TERM_PROGRAM: 'tmux', TERM_PROGRAM_VERSION: '3.5a', LC_TERMINAL: 'iTerm2', LC_TERMINAL_VERSION: '3.7.7' }],
+  ['of no version over ssh or inside tmux', { TERM_PROGRAM: 'tmux', TERM_PROGRAM_VERSION: '3.9', LC_TERMINAL: 'iTerm2' }],
 ] as const) {
-  test(`in iTerm2, ${what}, the picture is off: a line says why, the rows stay and no frame is sent`, { options: PICTURE }, async ($, on) => {
+  test(`in iTerm2 ${what} the picture is off: a line says why, the rows stay and no frame is sent`, { options: PICTURE }, async ($, on) => {
     const clock = mock.clock(on, { now: 1_000_000 })
     mock.env(on, variables)
     let frames = 0
@@ -493,10 +519,34 @@ for (const [what, variables] of [
 
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     expect(await ui.find({ type: 'Image' })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: /No picture in iTerm2/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /No picture in iTerm2 before 3\.7\.8/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Build it/ })).toBeDefined()
     await clock.advance(5000)
     expect(frames).toBe(0)
+    await ui.unmount()
+  })
+}
+
+for (const [what, variables] of [
+  ['in its own window', { TERM_PROGRAM: 'iTerm.app', TERM_PROGRAM_VERSION: '3.7.8' }],
+  ['over ssh or inside tmux', { TERM_PROGRAM: 'tmux', TERM_PROGRAM_VERSION: '3.5a', LC_TERMINAL: 'iTerm2', LC_TERMINAL_VERSION: '3.7.8' }],
+] as const) {
+  test(`in iTerm2 3.7.8, ${what}, the picture is back and its frames are sent`, { options: PICTURE }, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    mock.env(on, variables)
+    let frames = 0
+    on('ui.blit', () => {
+      frames++
+      return { value: {} }
+    })
+    on('tool.call', () => ({ result: { backgroundTaskId: 'b1' } }))
+    await $.tool.call({ tool: 'Bash', command: 'make', description: 'Build it', run_in_background: true })
+
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect((await ui.find({ type: 'Image' }))?.key).toBe('map')
+    expect(await ui.find({ type: 'Text', text: /No picture in iTerm2/ })).toBeUndefined()
+    await clock.advance(5000)
+    expect(frames).toBeGreaterThan(0)
     await ui.unmount()
   })
 }
@@ -515,5 +565,47 @@ test('a theme set in the options wins over the terminal', { options: { ...PICTUR
   mock.env(on, { COLORFGBG: '0;15' })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await inkOf(ui)).toBeLessThan(DARK_INK)
+  await ui.unmount()
+})
+
+test('a frame waits as long as its size asks, so that no second sends more than a terminal shows', () => {
+  // The whole budget in one frame: a second. A frame as the map sends it: within the five a second it is painted at.
+  expect(paceFor(SENT_A_SECOND)).toBe(1000)
+  expect(paceFor(80 * 1024)).toBe(178)
+  // The frame of the scale the picture had before, 133 KB: under four a second, where five were sent and lost in kitty.
+  expect(paceFor(133 * 1024)).toBe(296)
+  expect(paceFor(0)).toBe(0)
+})
+
+// From an outside review of 0.13.2: the pane is drawn again at every change of the board, and those drawings went past the budget.
+test('a burst of calls sends no more in a second than the budget: a drawing that comes too soon sends no frame of its own', { options: { terminalView: 'picture' }, timeoutMs: 60_000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const blits: number[] = []
+  on('ui.blit', (_, e) => {
+    const source: { png?: string; rgba?: string } = 'source' in e ? (e.source as { png?: string; rgba?: string }) : {}
+    blits.push((source.png ?? source.rgba ?? '').length)
+    return { value: {} }
+  })
+  on('tool.call', () => ({ result: {} }))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await clock.advance(1000)
+  const imageNow = async (): Promise<string> => {
+    const source = ((await ui.find({ type: 'Image' }))?.props.source ?? {}) as { png?: string; rgba?: string }
+    return source.png ?? source.rgba ?? ''
+  }
+  let last = await imageNow()
+  const from = blits.length
+  const drawn: number[] = []
+  // Ten calls in a second: each change of the board draws the pane again, with a new frame.
+  for (let i = 0; i < 10; i++) {
+    await $.tool.call({ tool: 'Read', file_path: `/a/b/f${i}.py` } as never)
+    const now = await imageNow()
+    if (now !== '' && now !== last) drawn.push(now.length)
+    last = now
+    await clock.advance(100)
+  }
+  const frames = [...blits.slice(from), ...drawn]
+  // As the project's own test allows: the budget, and the frame that ends the second.
+  expect(frames.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(SENT_A_SECOND + Math.max(0, ...frames))
   await ui.unmount()
 })

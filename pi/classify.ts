@@ -40,6 +40,24 @@ const NET_TOOLS: Record<string, true> = { web_search: true, fetch: true, github:
 const BROWSER_TOOLS: Record<string, true> = { browser: true, computer: true }
 
 /**
+ * The commands pi and omp's memory runs under. The Claude classifier shows a command's name only when it is one it
+ * knows or one the person named; these are the host's own, so they are named here. A line that runs one is a memory
+ * call, and its row says the command's name and not the words after it.
+ */
+const MEMORY_COMMANDS = ['retain', 'recall', 'reflect', 'memory_edit']
+
+/** The same setup with those commands named, made once per setup and kept, since a setup lives as long as a session. */
+const knownSetups = new WeakMap<Setup, Setup>()
+const withMemoryCommands = (setup: Setup): Setup => {
+  let known = knownSetups.get(setup)
+  if (known === undefined) {
+    known = { ...setup, memoryCommands: [...new Set([...setup.memoryCommands, ...MEMORY_COMMANDS])] }
+    knownSetups.set(setup, known)
+  }
+  return known
+}
+
+/**
  * The tool calls pi and omp make, on the same ten stations as the Claude mod.
  * Unknown tools — MCP servers, extensions and plugins — go by their own names, never by their input.
  */
@@ -60,7 +78,7 @@ export function classifyPi(tool: string, input: Record<string, unknown>, setup: 
       (typeof input.name === 'string' && input.name) ||
       (typeof input.cwd === 'string' && input.cwd) ||
       ''
-    return classifyShell(typeof input.command === 'string' ? input.command : '', description, setup)
+    return classifyShell(typeof input.command === 'string' ? input.command : '', description, withMemoryCommands(setup))
   }
 
   if (NET_TOOLS[lower] === true) {

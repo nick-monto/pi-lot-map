@@ -5,7 +5,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Entry } from '../types'
 import { background, begin, change, charge, compactionWindowOf, contextOf, finish, kept, newId, quietly, settle } from './board'
 import { stepCosts } from './cost'
-import { classify, clean, firstLine, keepNewest, memoryIds, setupFrom, shortModel, taskNotice, taskOf } from './map'
+import { TASK_TOOLS, classify, clean, firstLine, keepNewest, memoryIds, setupFrom, shortModel, taskNotice, taskOf } from './map'
 import type { Setup } from './map'
 import { ZOOMS, drawPane } from './pane'
 import { terminalMap } from './terminal'
@@ -67,9 +67,11 @@ export const register: Register = (on, options) => {
     await quietly(() => $.command.register({ name: 'lot-map', description: t.command }))
     // Where no surface is attached yet, as in the desktop app at its start, an open has nowhere to go and the
     // engine says so in the transcript. The pane is opened once a surface joins instead. If the roster cannot
-    // be read, the open is tried as before.
-    const surfaces = await quietly(() => $.session.surfaces())
-    if (surfaces === undefined || surfaces.length > 0) void quietly(() => $.ui.open(pane))
+    // be read, the open is tried as before. With `openAtStart` off the pane waits for `/lot-map`.
+    if (setup.openAtStart) {
+      const surfaces = await quietly(() => $.session.surfaces())
+      if (surfaces === undefined || surfaces.length > 0) void quietly(() => $.ui.open(pane))
+    }
     await quietly(async () => {
       const minimized = (await $.store.get('paneMin')) === true
       const kept = await $.store.get('mapZoom')
@@ -85,7 +87,7 @@ export const register: Register = (on, options) => {
   })
 
   on('session.attach', async ($, e, next) => {
-    void quietly(() => $.ui.open(pane))
+    if (setup.openAtStart) void quietly(() => $.ui.open(pane))
     return next(e)
   })
 
@@ -94,8 +96,15 @@ export const register: Register = (on, options) => {
     return { text: opened.isPlaced ? t.opened : t.cannotOpen(String(opened.reason)) }
   })
 
+  // What the last prompt that was not a task's notification would be read as, if it has the look of one: a task's id
+  // and how it ended, and none of its text. A person's, a peer's, a trigger's. `turn.start` is not told where its
+  // text comes from, and `prompt.submit` is.
+  let pasted: ReturnType<typeof taskNotice>
   on('turn.start', async ($, e, next) => {
-    const notice = e.agentId === undefined ? taskNotice(e.text) : undefined
+    // A message that only looks like a notification, pasted from a log, is a message.
+    const read = e.agentId === undefined ? taskNotice(e.text) : undefined
+    const notice = read !== undefined && read.id === pasted?.id && read.status === pasted.status ? undefined : read
+    if (e.agentId === undefined) pasted = undefined
     if (notice !== undefined) {
       // A background task reporting back is no message of the person's.
       if (notice.status !== undefined) await settle($, notice.id, notice.status)
@@ -150,7 +159,8 @@ export const register: Register = (on, options) => {
       station: 'model',
       label: `${shortModel(e.model)} · ${t.step(e.index + 1)}${isMain ? '' : ` · ${crew.get(e.agentId ?? '') ?? t.subagent}`}`,
       from: isMain ? 'core' : 'agents',
-      ...(isMain ? { patch: { model: e.model, step: e.index + 1 } } : { agentId: e.agentId }),
+      // The model's name is drawn as text too: cleaned like a label before it is kept.
+      ...(isMain ? { patch: { model: clean(e.model, 60), step: e.index + 1 } } : { agentId: e.agentId }),
     })
     try {
       return yield* next(e)
@@ -212,7 +222,7 @@ export const register: Register = (on, options) => {
     try {
       const ran = await next(e)
       const wasRefused = ran.deny !== undefined || (e.tool_use_id !== undefined && refused.delete(e.tool_use_id))
-      const task = wasRefused || ran.isError === true ? undefined : taskOf(ran.result)
+      const task = wasRefused || ran.isError === true || !TASK_TOOLS.has(e.tool) ? undefined : taskOf(ran.result)
       if (task !== undefined) {
         await background($, id, task)
         return ran
@@ -251,6 +261,7 @@ export const register: Register = (on, options) => {
 
   // A notification delivered into a running turn starts no turn of its own; this is where it is seen.
   on('prompt.submit', async ($, e, next) => {
+    if (e.origin !== undefined && e.origin.kind !== 'task-notification') pasted = taskNotice(e.text)
     await quietly(async () => {
       if (e.origin?.kind !== 'task-notification') return
       const notice = taskNotice(e.text)

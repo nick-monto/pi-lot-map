@@ -2,7 +2,7 @@
 
 lot-map is a mod for Claude Code, and an extension for pi and omp, that draws a map of the work in a pane beside the chat or above the editor. It runs inside those hosts on your computer. There is no lot-map service and no account: nothing the mod sees leaves your machine through it, and the one thing it serves, the drawing, goes to your own browser on `127.0.0.1`.
 
-This page describes version 0.11.0. It changes only together with the code, and the [changelog](CHANGELOG.md) says when it did.
+This page describes version 0.14.1. It changes only together with the code, and the [changelog](CHANGELOG.md) says when it did.
 
 ## What the mod is handed
 
@@ -12,7 +12,7 @@ The mod does not look for personal data and has no use for it. It takes a name f
 
 - a file: the last two parts of its path;
 - a web address: the host alone, without a login, password, path or query;
-- a shell command or a monitor: the short description Claude wrote for it, or the command's name, never the command line;
+- a shell command or a monitor: the short description Claude wrote for it. With no description, the command's name if it is a command the mod knows by name (`git`, `make`, `curl` and the like) or one you named in `memoryCommands` or `commandStations`, and the word `shell` for any other. Never the command line;
 - a search: the tool's name for `Grep` and `Glob`, the words `web search` for a web search and `loading tools` for a tool search, in the map's language, never the pattern or the query;
 - a memory call: the tool's name and a record number or short identifier, never the text or the query;
 - a subagent: the short description it was started with; with `subagentNames` on, its first 40 characters on that subagent's model steps as well;
@@ -21,7 +21,7 @@ The mod does not look for personal data and has no use for it. It takes a name f
 - a hook's refusal: the name of the tool it stopped, and its first line only if you turn `hookReasons` on;
 - context a hook added: that it was added, and record numbers only if you turn `hookRecords` on.
 
-The mod asks for three things by itself, all environment variables, and only for the map in a terminal. `COLORFGBG`, with `terminalView` set to `picture` or `braille` and `theme` on `auto`: it holds the terminal's colour numbers, by which the map above the rows is painted light or dark. `TERM_PROGRAM` and `LC_TERMINAL`, with `terminalView` set to `picture`: they name the terminal program, and in iTerm2 the picture stays off. The mod keeps the two answers for the session, light or dark and iTerm2 or not, and nothing else from them, and reads no other variable.
+The mod asks for five things by itself, all environment variables, and only for the map in a terminal. `COLORFGBG`, with `terminalView` set to `picture` or `braille` and `theme` on `auto`: it holds the terminal's colour numbers, by which the map above the rows is painted light or dark. `TERM_PROGRAM` and `LC_TERMINAL`, with `terminalView` set to `picture`: they name the terminal program. In iTerm2, also one of `TERM_PROGRAM_VERSION` and `LC_TERMINAL_VERSION`: iTerm2's version, since before 3.7.8 the picture stays off. The mod keeps the two answers for the session, light or dark and whether the picture is off, and nothing else from them, and reads no other variable.
 
 With `contextWindow` set to `compaction`, it also asks Claude Code how the context divides up, at a session's first model step and again after a compaction or a change of model. The answer names the memory files, MCP tools and skills in the context; the mod takes from it only the size of the auto-compact window, a number, and holds it in its own memory for the session, not in Claude Code's state.
 

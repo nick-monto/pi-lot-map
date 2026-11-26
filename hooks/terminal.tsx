@@ -7,12 +7,34 @@ import type { Board } from '../types'
 import { brailleSize, nextFrameIn, packCells, paintBraille } from './braille'
 import { describeNow, drawMap } from './map'
 import type { Setup } from './map'
-import { endlessEvery, imageSource, nextChangeIn, paint, parseMap, scaleFor } from './raster'
-import type { Scene } from './raster'
+import { imageSource } from './png'
+import { paint, scaleFor } from './raster'
+import { endlessEvery, nextChangeIn, parseMap } from './scene'
+import type { Scene } from './scene'
 
 const MAP_KEY = 'map'
-/** Pixels per unit of the drawing: about what a docked pane shows on a sharp screen. The Image's size limit may take it lower. */
-export const SCALE = 1.5
+/**
+ * Pixels per unit of the drawing: a frame of 460 by 430 pixels, some 80 KB as it is sent. It was 1.5, about what a
+ * docked pane shows on a sharp screen, at some 133 KB a frame: more than `SENT_A_SECOND` lets through five times a
+ * second. The Image's size limit may take it lower.
+ */
+export const SCALE = 1
+/**
+ * The most the picture sends in a second, in characters of base64. Above some 530 to 630 KB a second kitty 0.50 on
+ * macOS stops showing the picture while the map moves, whatever the size of a frame and however often it comes: of
+ * eight pairs of size and pace watched on 2026-11-22, the three under 532 KB a second moved evenly and the five over
+ * 635 lost the map (issue #110). Whether the limit is kitty's or Claude Code's is not known.
+ */
+export const SENT_A_SECOND = 450 * 1024
+
+/** How long a frame of this many characters must be left on show before the next, in ms, to keep under `SENT_A_SECOND`. */
+export const paceFor = (characters: number): number => Math.ceil((characters * 1000) / SENT_A_SECOND)
+
+/** How many characters a frame is as it is sent. */
+const sizeOf = (source: ReturnType<typeof imageSource>): number => ('png' in source ? source.png : source.rgba).length
+
+/** The wait before the next frame, never shorter than the frame just sent allows. */
+const paced = (next: number | undefined, sent: number): number | undefined => (next === undefined ? undefined : Math.max(next, paceFor(sent)))
 /** Narrower than this the map cannot be read, and the pane stays text. */
 const MAP_MIN_COLUMNS = 24
 const MAP_MAX_COLUMNS = 72
@@ -47,8 +69,12 @@ export type Picture = {
   showsPictures: boolean | undefined
   /** Under `auto`, until the first drawing has asked the terminal whether it is light or dark. */
   isSchemeUnknown: boolean
-  /** Whether this terminal keeps every picture it is sent (iTerm2): unknown until the first drawing has asked. No picture there. */
+  /** Whether this terminal keeps every picture it is sent (iTerm2 before 3.7.8): unknown until the first drawing has asked. No picture there. */
   keepsFrames: boolean | undefined
+  /** The last frame sent, with a drawing or by the loop: when, and how large. The next one waits for it, whoever sends it. */
+  sent: { at: number; size: number } | undefined
+  /** The frame the last drawing gave its Image. A drawing that may send none gives the same one again, so the Image does not change. */
+  given: ReturnType<typeof imageSource> | undefined
 }
 
 /** A map's next frame in `delay` ms, in place of the one it was waiting for; none with no delay. */
@@ -79,13 +105,32 @@ async function settleScheme($: EngineInterface, map: Picture | Braille): Promise
 /** iTerm2 by what it tells a program: `TERM_PROGRAM` in its own window, `LC_TERMINAL` over ssh and inside tmux. */
 export const isITerm2 = (termProgram: string | undefined, lcTerminal: string | undefined): boolean => termProgram === 'iTerm.app' || lcTerminal === 'iTerm2'
 
+/** The first iTerm2 that frees a picture drawn over: 3.7.8. */
+const ITERM2_FREES_FROM = [3, 7, 8] as const
+
+/** Whether a version as iTerm2 writes it, `3.7.8` or `3.7.8beta1`, is 3.7.8 or later. One it does not give, or that does not read as numbers, is not. */
+export function freesFrames(version: string | undefined): boolean {
+  const parts = /^(\d+)\.(\d+)(?:\.(\d+))?/.exec(version ?? '')
+  if (parts === null) return false
+  for (let i = 0; i < ITERM2_FREES_FROM.length; i++) {
+    const part = Number(parts[i + 1] ?? 0)
+    if (part !== ITERM2_FREES_FROM[i]) return part > ITERM2_FREES_FROM[i]!
+  }
+  return true
+}
+
 /**
- * Whether the terminal keeps every picture it is sent. iTerm2 3.7.7 does, until the tab is closed: about 2 MB a frame,
- * 17 GB in five minutes of a moving map (issue #81). Where nothing can be read, no.
+ * Whether the terminal keeps every picture it is sent. iTerm2 before 3.7.8 does, until the tab is closed: in 3.7.7
+ * about 2 MB a frame, 17 GB in five minutes of a moving map (issue #81). 3.7.8 holds level: 1466 frames in four and a
+ * half minutes, 327 to 351 MB (measured on 2026-11-19). The version stands beside the name that told of iTerm2:
+ * `TERM_PROGRAM_VERSION` in its own window, `LC_TERMINAL_VERSION` over ssh and inside tmux. Where nothing can be read, no.
  */
 async function keepsFrames($: EngineInterface): Promise<boolean> {
   try {
-    return isITerm2(await $.env.get('TERM_PROGRAM'), await $.env.get('LC_TERMINAL'))
+    const termProgram = await $.env.get('TERM_PROGRAM')
+    const lcTerminal = await $.env.get('LC_TERMINAL')
+    if (!isITerm2(termProgram, lcTerminal)) return false
+    return !freesFrames(termProgram === 'iTerm.app' ? await $.env.get('TERM_PROGRAM_VERSION') : await $.env.get('LC_TERMINAL_VERSION'))
   } catch {
     return false
   }
@@ -101,10 +146,10 @@ export function terminalPicture(setup: Setup): Picture | undefined {
     theme: setup.theme === 'auto' ? 'dark' : setup.theme,
     background: setup.colors.ground === undefined ? 'transparent' : setup.background,
   }
-  return { setup: pictureSetup, shown: undefined, timer: undefined, showsPictures: undefined, isSchemeUnknown: setup.theme === 'auto', keepsFrames: undefined }
+  return { setup: pictureSetup, shown: undefined, timer: undefined, showsPictures: undefined, isSchemeUnknown: setup.theme === 'auto', keepsFrames: undefined, sent: undefined, given: undefined }
 }
 
-/** The picture above the rows for this board; its loop then keeps it moving. None in a pane too narrow, or a terminal that shows no pictures; in iTerm2, a line saying why there is none. */
+/** The picture above the rows for this board; its loop then keeps it moving. None in a pane too narrow, or a terminal that shows no pictures; in iTerm2 before 3.7.8, a line saying why there is none. */
 export async function drawPicture($: EngineInterface, e: RenderInputOf<'Pane', 'terminal'>, board: Board, now: number, picture: Picture): Promise<RenderElement | undefined> {
   if (picture.keepsFrames === undefined) picture.keepsFrames = await keepsFrames($)
   if (picture.keepsFrames) {
@@ -127,13 +172,24 @@ export async function drawPicture($: EngineInterface, e: RenderInputOf<'Pane', '
   }
   const busy = isBusy(board)
   picture.shown = { scene, pane: e.requestId, drawnAt: now, isBusy: busy }
+  // The pane is drawn again at every change of the board, and a burst of calls changes it many times a second. A
+  // drawing that comes sooner than the last frame's size allows sends no frame of its own: the frame on show stays,
+  // and the loop paints this drawing as soon as it may. Without this the drawings alone sent twice the budget.
+  const last = picture.sent
+  const wait = last === undefined ? 0 : last.at + paceFor(last.size) - now
+  const held = wait > 0 ? picture.given : undefined
   // This frame goes with the drawing; the loop sends the rest, and its first frame tells whether pictures show here.
-  const next = nextChangeIn(scene, 0, endlessEvery(0, busy))
-  schedule($, picture, picture.showsPictures ? next : Math.min(PROBE_MS, next ?? PROBE_MS), () => tick($, picture))
+  const source = held ?? imageSource(paint(scene, 0, scaleFor(scene, SCALE)))
+  if (held === undefined) {
+    picture.sent = { at: now, size: sizeOf(source) }
+    picture.given = source
+  }
+  const next = held === undefined ? paced(nextChangeIn(scene, 0, endlessEvery(0, busy)), sizeOf(source)) : wait
+  schedule($, picture, picture.showsPictures || held !== undefined ? next : Math.min(PROBE_MS, next ?? PROBE_MS), () => tick($, picture))
   return (
     <Image
       key={MAP_KEY}
-      source={imageSource(paint(scene, 0, scaleFor(scene, SCALE)))}
+      source={source}
       columns={columns}
       rows={Math.max(1, Math.round(columns * perColumn))}
       alt={`${setup.t.title}. ${describeNow(board, setup.t)}`}
@@ -147,7 +203,8 @@ async function tick($: EngineInterface, picture: Picture): Promise<void> {
   const drawing = picture.shown
   if (drawing === undefined) return
   const t = (await $.clock.now()) - drawing.drawnAt
-  const sent = await $.ui.blit({ requestId: drawing.pane, key: MAP_KEY, source: imageSource(paint(drawing.scene, t, scaleFor(drawing.scene, SCALE))) })
+  const source = imageSource(paint(drawing.scene, t, scaleFor(drawing.scene, SCALE)))
+  const sent = await $.ui.blit({ requestId: drawing.pane, key: MAP_KEY, source })
   if (sent.deny !== undefined) {
     // Not on show any more, or the terminal draws the words instead; the engine says which only in words.
     if (picture.shown === drawing) picture.shown = undefined
@@ -158,8 +215,9 @@ async function tick($: EngineInterface, picture: Picture): Promise<void> {
     return
   }
   picture.showsPictures = true
+  picture.sent = { at: drawing.drawnAt + t, size: sizeOf(source) }
   if (picture.shown !== drawing) return
-  const next = nextChangeIn(drawing.scene, t, endlessEvery(t, drawing.isBusy))
+  const next = paced(nextChangeIn(drawing.scene, t, endlessEvery(t, drawing.isBusy)), sizeOf(source))
   // Less the time this frame took, but at least a third of the wait, to leave the mod's other hooks their turn.
   const spent = (await $.clock.now()) - drawing.drawnAt - t
   schedule($, picture, next === undefined ? undefined : Math.round(Math.max(next - spent, next / 3)), () => tick($, picture))

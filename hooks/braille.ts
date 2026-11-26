@@ -5,7 +5,7 @@
 // Nothing here touches the engine.
 import type { Board, Entry, StationId } from '../types'
 import { formatTokens, shortModel } from './classify'
-import { ALARM_MS, DONE_MS, GLOW_MS, PULSE_MS, SWITCH_MS } from './draw'
+import { ALARM_MS, DONE_MS, GLOW_MS, PULSE_MS, SWITCH_MS, shownOf } from './draw'
 import { DARK, LIGHT } from './palette'
 import type { Palette } from './palette'
 import { STATIONS } from './setup'
@@ -73,9 +73,13 @@ function oval(c: Cells, cx: number, cy: number, rx: number, ry: number, color: (
 /**
  * Whether a cell can hold the letter. A Raster takes one printable character a column wide and refuses the whole
  * drawing for any other, so only scripts known to be that are let through: Latin, Greek and Cyrillic.
+ * Latin Extended Additional (U+1E00–U+1EFF) is Latin a column wide too: Vietnamese writes with it.
  */
 const fits = (code: number): boolean =>
-  (code >= 0x20 && code < 0x7f) || (code >= 0xa1 && code < 0x250 && code !== 0xad) || (code >= 0x370 && code < 0x530 && /^[\p{L}\p{N}\p{P}]$/u.test(String.fromCodePoint(code)))
+  (code >= 0x20 && code < 0x7f) ||
+  (code >= 0xa1 && code < 0x250 && code !== 0xad) ||
+  (code >= 0x370 && code < 0x530 && /^[\p{L}\p{N}\p{P}]$/u.test(String.fromCodePoint(code))) ||
+  (code >= 0x1e00 && code < 0x1f00 && /^\p{L}$/u.test(String.fromCodePoint(code)))
 
 /** Letters over whatever dots were there: a name is never struck through by a line. One the grid cannot hold is a `?`. */
 function write(c: Cells, column: number, row: number, text: string, color: number): void {
@@ -168,8 +172,6 @@ function inkOf(setup: Setup): Ink {
 
 // ---- the ring ------------------------------------------------------------------------------------
 
-/** As the first drawing: the newest entries are the ones that can still show. */
-const RECENT = 40
 /** A spoke stays lit this long after a call starts on it, as the first drawing's beam does. */
 const BEAM_MS = GLOW_MS / 2
 /** A station at work wears a second ring every other beat. */
@@ -282,7 +284,7 @@ export function paintBraille(board: Board, now: number, setup: Setup, columns: n
   const names = setup.t.stations
   // With reduced motion nothing flies, spreads or circles: a call lights its station and its spoke, and those only change color.
   const isStill = setup.motion === 'reduced'
-  const recent = board.entries.slice(-RECENT)
+  const recent = shownOf(board.entries)
   const { cx, cy, mid, places } = ringOf(setup, columns, rows)
   const placeOf = (id: StationId): Place | undefined => places.find(p => p.id === id)
 
@@ -424,7 +426,7 @@ const ENDLESS_LATER_MS = 5000
  * rest asks for no frame. `sinceDrawn` is how long ago the board last changed.
  */
 export function nextFrameIn(board: Board, now: number, setup: Setup, sinceDrawn = 0): number | undefined {
-  const recent = board.entries.slice(-RECENT)
+  const recent = shownOf(board.entries)
   const isStill = setup.motion === 'reduced'
   let soonest = Infinity
   /** A moment at which something changes color. One already past changes nothing more. */

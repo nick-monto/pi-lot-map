@@ -314,11 +314,11 @@ export default function lotMap(host: Host): void {
     }
     if (web === undefined) {
       try {
-        web = await serveFrames({ port: config.webPort, title, frame: () => drawMap(board, now(), setup, true) })
+        web = await serveFrames({ port: config.webPort, title, frame: () => drawMap(board, now(), setup) })
       } catch {
         if (config.webPort !== 0) {
           try {
-            web = await serveFrames({ port: 0, title, frame: () => drawMap(board, now(), setup, true) })
+            web = await serveFrames({ port: 0, title, frame: () => drawMap(board, now(), setup) })
           } catch {
             // No port to be had.
           }

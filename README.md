@@ -1,4 +1,4 @@
-# lot-map
+# Lot Map for Claude Code
 
 A mod for Claude Code, pi and omp: a live map of the work, in a pane beside the chat (Claude Code) or above the editor (pi and omp). Every tool call, model step, hook and skill sends a pulse from the centre to its station, so you see memory, files, shell, web and agents at work instead of reading a list of commands.
 
@@ -6,7 +6,7 @@ It runs on your machine and sends nothing anywhere. Local does not mean blind: l
 
 ![The map during a work session](docs/demo.gif)
 
-*A made-up session replayed through the mod's own drawing code. [Video (MP4)](docs/demo.mp4).*
+*A made-up session replayed through the mod's own drawing code. [Video (MP4)](docs/demo.mp4). Or [play it in your browser](https://alexeyw.github.io/lot-map/), where the page runs the same code and shows what each call hands the mod and what the mod keeps.*
 
 ## Install
 
@@ -31,7 +31,7 @@ claude plugin install lot-map@lot-map
 
 In the desktop app: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `alexeyw/lot-map`, then **Add plugin**.
 
-The pane opens by itself when a session starts. In a terminal it needs at least 144 columns, otherwise type `/lot-map`, and it draws text only unless you ask for the map, as a picture or in braille dots: see [In a terminal](#in-a-terminal). Built and tested on Claude Code 2.1.321 on macOS; users report it working on Windows and Linux as well.
+The pane opens by itself when a session starts; with `openAtStart` off it waits for `/lot-map`. In a terminal it needs at least 144 columns, otherwise type `/lot-map`, and it draws text only unless you ask for the map, as a picture or in braille dots: see [In a terminal](#in-a-terminal). Built and tested on Claude Code 2.1.321 on macOS; users report it working on Windows and Linux as well.
 
 On a Team or Enterprise login the transcript may get notices like `lot-map: its classic.PreToolUse hook was skipped`. Turn `guardedHooks` off and they stop; [Options](#what-it-shows) says what the map loses for it.
 
@@ -55,7 +55,7 @@ A subagent is a row on Agents; in omp its own tool calls leave from that station
 
 `/lot-map web` serves the pane's own SVG drawing to a browser window: the same stations, pulses and colours the Claude pane shows, at browser frame rate. It opens a Chromium or Edge app window when one is installed and the default browser otherwise; the URL is also printed so the window can be placed wherever you like. Frames come from `127.0.0.1` under a random path and only while a page asks for them. The window is named after the session: `<name> [<session id>]`, with the folder's name in place of the session name when it has none, so two windows open in one project are still told apart and the id matches the end of the session's own file under `~/.pi/agent/sessions` or `~/.omp/agent/sessions`. The name is read when the window loads, so `/lot-map web` again after a rename shows the new one. Set `webPort` to pin the port (a busy one falls back to a free port) and `browser` to a command that opens the URL; `{}` in that command stands for the URL.
 
-Settings live in `~/.pi/agent/lot-map.json` or `~/.omp/agent/lot-map.json`; `LOT_MAP_CONFIG` points elsewhere. The keys are `enabled` (off by default), `view` (`auto`, `map` or `feed`), `placement` (`above` or `below`), `language`, `coreName`, `webPort`, `browser`, `contextCost`, `subagentNames`, and the memory options from the Claude mod: `memoryServers`, `memoryCommands`, `memorySubcommands`, `memoryPaths`, `memoryLabels`. Changes are read at session start and on `/reload`.
+Settings live in `~/.pi/agent/lot-map.json` or `~/.omp/agent/lot-map.json`; `LOT_MAP_CONFIG` points elsewhere. The keys are `enabled` (off by default), `view` (`auto`, `map` or `feed`), `placement` (`above` or `below`), `language`, `coreName`, `webPort`, `browser`, `contextCost`, `subagentNames`, the memory options from the Claude mod: `memoryServers`, `memoryCommands`, `memorySubcommands`, `memoryPaths`, `memoryLabels`, `commandStations`; and the drawing options the browser window shares with the Claude pane: `theme`, `background`, `colors`, `layout` (which also turns the terminal ring) and `motion`. Changes are read at session start and on `/reload`.
 
 What the terminal view does not have: the SVG drawing (it gets cells) and a pane side by side with the chat; `/lot-map web` carries the drawing to a browser window instead. There is no memory of the model used in the last session in a folder. In omp, subagents are read from the task frames; a pi extension that spawns agents is outside the map's view for now.
 
@@ -89,7 +89,7 @@ What each version changed is in [CHANGELOG.md](CHANGELOG.md).
 
 On Windows the PowerShell tool is read the same way as Bash, with PowerShell's own names: `Get-Content` and `Select-String` light Files, `Invoke-WebRequest` lights Network. A program run by its full path is read by its name, also from a quoted path with a space, and `CURL.EXE` is `curl`.
 
-The shell stations go by the command's name, not by what it does: a script that opens a connection itself, such as `python -c "…"`, shows as Shell. A command behind `sudo`, `env`, `timeout`, `nohup`, `xargs` and the like is read as the command it runs, and `find … -exec` as the command it is told to run. So is a command inside a loop or a condition (`for … do`, `if … then`, `while`, `!`, `{ … }`), and a line handed to a shell or to `eval` (`bash -c "…"`). The text of a here-document is not read, so a file written through one shows as Files whatever the text says. A line is read up to its first 8,000 characters. `npx` counts as Network only with `-y`, since without it it mostly runs what is installed already.
+The shell stations go by the command's name, not by what it does: a script that opens a connection itself, such as `python -c "…"`, shows as Shell. A command behind `sudo`, `env`, `timeout`, `nohup`, `xargs` and the like is read as the command it runs, and `find … -exec` as the command it is told to run. So is a command inside a loop or a condition (`for … do`, `if … then`, `while`, `!`, `{ … }`), in the body of a function defined on the line, in a PowerShell script block (`ForEach-Object { … }`), and a line handed over as a text to a shell, to `eval`, to `env -S`, to PowerShell or to cmd (`bash -c "…"`, `iex '…'`, `pwsh -Command "…"`, `cmd /c …`); one kept in a variable is not known and stays Shell. The text of a here-document is not read, so a file written through one shows as Files whatever the text says; but with a mark written bare, `<<EOF` and not `<<'EOF'`, the shell runs what the text holds in `$( )` and in backticks, and those commands are read. A line is read up to its first 8,000 characters; a longer one is never shown as Files, since what stands past them is not known. A command that runs a package by its name (`npx`, `bunx`, `npm exec`, `bun x`, `uvx`, `go run` with a version, `deno run` with an address) counts as Network, since it fetches the package when it is not there and the line does not say whether it is; `npx --no-install` stays Shell.
 
 A pulse flies out when something starts and returns when it ends. Refusals and errors turn red.
 
@@ -141,9 +141,9 @@ In pi and omp the figure comes from the engine's own context meter, the one behi
 
 A terminal shows the rows alone. With `terminalView` set to `picture`, a terminal that shows pictures, such as kitty or Ghostty, gets the map as a picture above the rows, moving as it does in the desktop app. Claude Code must draw in fullscreen. If the pane stands under the conversation and not beside it, Claude Code is drawing on the main screen, and the rows stay alone: type `/tui fullscreen`, or start it as `CLAUDE_CODE_NO_FLICKER=1 claude`. Inside tmux, set `allow-passthrough on` and `focus-events on`. Any other terminal shows the rows alone, as before, and so does a pane narrower than 24 columns.
 
-In iTerm2 the picture is off, and a line above the rows says so. iTerm2 keeps every picture it is sent until its tab is closed: in iTerm2 3.7.7 a moving map took about 2 MB a frame, 17 GB in five minutes (#81). The mod knows iTerm2 by `TERM_PROGRAM`, and by `LC_TERMINAL` over ssh or inside tmux. For the map there, set `terminalView` to `braille`.
+In iTerm2 the picture needs iTerm2 3.7.8 or later. An earlier one keeps every picture it is sent until its tab is closed: in iTerm2 3.7.7 a moving map took about 2 MB a frame, 17 GB in five minutes (#81). There the picture is off, and a line above the rows says so; update iTerm2, or set `terminalView` to `braille`. The mod knows iTerm2 by `TERM_PROGRAM`, and by `LC_TERMINAL` over ssh or inside tmux, and its version by `TERM_PROGRAM_VERSION` or `LC_TERMINAL_VERSION`; where the version is not given, the picture stays off.
 
-The mod paints the picture itself, from the same drawing as the desktop app's, with letters from the X.Org misc-fixed bitmap fonts, which are in the public domain; [FONTS.md](FONTS.md) says where they come from. It paints up to five frames a second while anything on the map moves. The core breathes in the picture only while something runs, smoothly for ten minutes after the map last changed and then a frame every five seconds; at rest the picture stands still once the trails have faded.
+The mod paints the picture itself, from the same drawing as the desktop app's, with letters from the X.Org misc-fixed bitmap fonts, which are in the public domain; [FONTS.md](FONTS.md) says where they come from. It paints up to five frames a second while anything on the map moves, and sends no more than 450 KB of them in a second, the frames that come with each drawing of the pane counted too: above some 530 to 630 KB a second kitty stops showing the picture until the map stands still, so a frame larger than usual waits longer for the next. The core breathes in the picture only while something runs, smoothly for ten minutes after the map last changed and then a frame every five seconds; at rest the picture stands still once the trails have faded.
 
 With `theme` on `auto` the picture is light or dark by the terminal's `COLORFGBG`, which iTerm2, rxvt and Konsole set; where nothing says, it is dark, and on a light terminal that does not say, set `theme` to `light`. The picture has no background of its own, so the terminal's shows through it; where that is a shade off the pane's grey, it leaves a faint box around the map. `paneBackground` set to `transparent` takes the grey away, so the terminal shows behind the map and the rows alike, also where the terminal is see-through; set to the terminal's colour as `#rrggbb`, it paints the pane in it. `colors` with `background=#rrggbb` gives the picture a background of its own instead.
 
@@ -192,9 +192,11 @@ The install offers them on a screen. Later, use `/config` in a terminal or `clau
 
 ### How it looks
 
+Each of these with a picture of its values: [How the options look](docs/options.md).
+
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `language` | `en` | `en`, `ru`, `es`, `fr`, `de`, `it` or `pt` |
+| `language` | `en` | `en`, `ru`, `es`, `fr`, `de`, `it`, `pt` or `vi` |
 | `coreName` | `CLAUDE` | what the circle in the middle says, up to ten characters |
 | `theme` | `auto` | the map's colours: `dark`, `light`, or `auto`, which is dark on a dark surface and light on a light one |
 | `background` | `solid` | the map's own background, or `transparent`, which lets the pane behind it show through. The rim around the labels keeps the background's colour, so on a surface of another shade it shows as a faint halo |
@@ -203,6 +205,7 @@ The install offers them on a screen. Later, use `/config` in a terminal or `clau
 | `layout` | `you-top` | where you are on the map: `you-top`, or `you-bottom`, which turns the ring half a turn so that you are at the bottom and the network and the browser at the top |
 | `motion` | `full` | `full`, or `reduced`: nothing flies, spreads or spins. A call still lights its station and flashes its spoke, the route still gets its leg, and those only fade; the clock hands around a running station stay, as slow as a clock's |
 | `textSize` | `footnote` | the size of the rows under the map: `caption`, `footnote` or `body`. A terminal has one size and ignores it |
+| `openAtStart` | `true` | whether the pane opens by itself when a session starts. With `false` it stays closed until you type `/lot-map`; the map is kept from the session's first call all the same, so it is whole when you open it |
 | `logRows` | `16` | how many rows the list under the map shows: `16`, or `fill`, as many as the pane has room for below the map, never fewer than 16. The oldest rows that do not fit are cut off at the bottom, above the calls still running. Only in the desktop app's docked pane; a terminal, the editor and the mobile app keep 16 |
 
 ### What it shows
@@ -213,25 +216,26 @@ The install offers them on a screen. Later, use `/config` in a terminal or `clau
 | `guardedHooks` | `true` | turn off on a Team or Enterprise login where the transcript gets notices like `lot-map: its classic.PreToolUse hook was skipped`. An organisation's guard keeps mods away from five events there, and with this off the mod adds no hook on them. The map then loses the Hooks station, the records a hook adds, the row of a typed slash command and the mark of a compaction; a call a hook refused still gets its `✕`, as a failed call and not as a blocked one |
 | `subagentNames` | `false` | a subagent's model step says which subagent it is, by the few words it was started with, up to 40 characters; off, it says only that it is a subagent |
 | `contextCost` | `false` | each row says about how many tokens the context grew by with its call's answer, and the map adds each station's sum to its count. An estimate, shown one step late; see [What each call adds to the context](#what-each-call-adds-to-the-context) |
-| `contextWindow` | `model` | what the ring and its percentage measure the context against: `model`, the model's whole window, as the status line does; or `compaction`, the auto-compact window, such as one set with `autoCompactWindow`, where it is smaller than the model's. Without one, or with auto-compaction off, `compaction` shows the same as `model` |
+| `contextWindow` | `model` | what the ring and its percentage measure the context against: `model`, the model's whole window, as the status line does; or `compaction`, the auto-compact window, such as one set with `autoCompactWindow`, where it is smaller than the model's. Without one, or with auto-compaction off, `compaction` shows the same as `model`. The window is read at a session's first model step, after a compaction and on a change of model; with `guardedHooks` off, not after a compaction |
 
 ### Memory and servers
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `memoryServers` | `memory` | MCP servers whose tools light Memory |
-| `memoryCommands` | none | shell commands or scripts that light Memory; a name counts when it is the command itself or begins with it and `-`, `_` or `.`, so `recall` also names `recall-sync.py` |
+| `memoryCommands` | none | shell commands or scripts that light Memory; a name counts when it is the command itself or begins with it and `-`, `_` or `.`, so `recall` also names `recall-sync.py`. A line that also runs another command that reaches the network goes to Network |
 | `memorySubcommands` | none | words after a memory command that the map may show, such as `add` or `search`; without them the command goes by its own name |
 | `memoryPaths` | none | parts of a path that make a file a memory |
 | `memoryLabels` | none | short names for memory tools, each as `tool=name` |
 | `serverStations` | none | put an MCP server's tools on a station of your choice, each as `server=station`, with `files`, `shell`, `web`, `browser`, `agents`, `skills` or `you`; the row still reads `server: tool`. What you set wins over the mod's own routes for the servers it knows. Memory keeps `memoryServers`, which wins if a server is in both; an unknown station is ignored |
+| `commandStations` | none | put a shell command on a station of your choice, each as `command=station`, with the stations `serverStations` takes; the row keeps its label. A name counts as it does in `memoryCommands`, and it is found wherever a command is: behind `sudo` or `env`, in a line handed to `bash -c`, in a container. What you set wins over what the command's own name says, so `gh=agents` keeps `gh` off Network; a line that also runs another command that reaches the network goes to Network. Memory keeps `memoryCommands`, which wins if a command is in both; an unknown station is ignored |
 | `hookRecords` | `false` | turn on if a hook of yours adds memory records numbered like `[#123]`; they appear on Memory by number only. Such a number in the text of any hook counts, not only a memory hook's |
 
 ### In a terminal only
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `terminalView` | `text` | how the map looks in a terminal: `text`, the rows alone; `picture`, the map's picture above them in a terminal that shows pictures, but not in iTerm2; or `braille`, the map above them in braille dots, in any terminal whose font has braille. See [In a terminal](#in-a-terminal) |
+| `terminalView` | `text` | how the map looks in a terminal: `text`, the rows alone; `picture`, the map's picture above them in a terminal that shows pictures, in iTerm2 from 3.7.8; or `braille`, the map above them in braille dots, in any terminal whose font has braille. See [In a terminal](#in-a-terminal) |
 | `cellShape` | `2.4` | for the terminal picture: how many times taller a terminal cell is than it is wide, from 1.2 to 4, so that the picture fills its box; see [In a terminal](#in-a-terminal) |
 
 For example, Russian labels and your own memory server:
@@ -297,7 +301,7 @@ A label holds a name, never content:
 
 - a file: the last two parts of its path;
 - a web address: the host alone, without a login, password, path or query; an address that can be read two ways shows only its scheme;
-- a shell command or a monitor: the short description Claude wrote for it, or the command's name, never the command line. The description is the model's own words, and the mod shows them as written;
+- a shell command or a monitor: the short description Claude wrote for it. With no description, the command's name if it is a command the mod knows by name (`git`, `make`, `curl` and the like) or one you named in `memoryCommands` or `commandStations`, and the word `shell` for any other: a program of your own, a script. The line is read by hand, and a word of it may be taken for a command by mistake; a word in no list is never shown. Never the command line. The description is the model's own words, and the mod shows them as written;
 - a search: the tool's name for `Grep` and `Glob`, the words `web search` for a web search and `loading tools` for a tool search, in the map's language, never the pattern or the query;
 - a memory call: the tool's name and a record number or short identifier, never the text or the query;
 - a memory command: its name, and the word after it only if you listed that word in `memorySubcommands`;
@@ -318,7 +322,7 @@ claude plugin validate .
 
 Words live in `hooks/text.ts`; a new language is one more table there and one more value of `language` in `.claude-plugin/plugin.json`.
 
-The terminal picture is painted by `hooks/raster.ts`, which reads the drawing `drawMap` makes. A test paints every kind of drawing and fails on anything the painter does not know, so a change to the drawing that needs more of SVG shows there first. Another, `the terminal picture's font has every letter the map writes, in every language`, names the letters a new language needs added to `hooks/font.ts`; [FONTS.md](FONTS.md) says how to make that file again.
+The terminal picture is made by three files: `hooks/scene.ts` reads the drawing `drawMap` makes, `hooks/raster.ts` paints it, and `hooks/png.ts` packs the pixels for the terminal. A test paints every kind of drawing and fails on anything the painter does not know, so a change to the drawing that needs more of SVG shows there first. Another, `the terminal picture's font has every letter the map writes, in every language`, names the letters a new language needs added to `hooks/font.ts`; [FONTS.md](FONTS.md) says how to make that file again.
 
 The braille map is drawn by `hooks/braille.ts`: a second drawing of the same board, which takes its stations from `STATIONS` and its timings from `hooks/draw.ts`. Tests in `hooks/braille.test.tsx` hold it to every station under both layouts, and one in `hooks/lot-map.test.tsx` to the names of every language. Something new on the map is either drawn there too or added to the list of what braille leaves out, in [In a terminal](#the-map-in-braille-dots): the `INVENTORY` in `hooks/braille.test.tsx` has a line for each thing the first drawing shows, a test holds both drawings to it, and `scripts/check-surface.mjs` holds that list to the same lines.
 
